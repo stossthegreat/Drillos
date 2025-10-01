@@ -1,0 +1,117 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Plan {
+  FREE
+  PRO
+}
+
+enum Tone {
+  strict
+  balanced
+  light
+}
+
+model User {
+  id           String    @id @default(cuid())
+  email        String?   @unique
+  tz           String    @default("Europe/London")
+  tone         Tone      @default(balanced)
+  intensity    Int       @default(2)
+  consentRoast Boolean   @default(false)
+  safeWord     String?
+  plan         Plan      @default(FREE)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  habits       Habit[]
+  antiHabits   AntiHabit[]
+  alarms       Alarm[]
+  events       Event[]
+  userFacts    UserFacts?
+}
+
+model Habit {
+  id        String    @id @default(cuid())
+  userId    String
+  title     String
+  schedule  Json      @default("{}")
+  streak    Int       @default(0)
+  lastTick  DateTime?
+  color     String    @default("emerald")
+  context   Json      @default("{}")
+  reminderEnabled Boolean @default(false)
+  reminderTime    String? @default("08:00")
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId])
+}
+
+model AntiHabit {
+  id          String    @id @default(cuid())
+  userId      String
+  name        String
+  targetMins  Int       @default(10)
+  cleanStreak Int       @default(0)
+  lastSlip    DateTime?
+  dangerWin   Json?     @default("{}")
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId])
+}
+
+model Alarm {
+  id        String    @id @default(cuid())
+  userId    String
+  label     String
+  rrule     String
+  tone      Tone      @default(balanced)
+  enabled   Boolean   @default(true)
+  nextRun   DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId])
+  @@index([nextRun])
+}
+
+model Event {
+  id        String   @id @default(cuid())
+  userId    String
+  ts        DateTime @default(now())
+  type      String
+  payload   Json     @default("{}")
+  embedding Bytes?
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId, ts])
+  @@index([type])
+}
+
+model UserFacts {
+  userId    String   @id
+  json      Json     @default("{}")
+  updatedAt DateTime @updatedAt
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VoiceCache {
+  id        String   @id
+  text      String
+  voice     String
+  url       String
+  createdAt DateTime @default(now())
+  @@index([createdAt])
+}

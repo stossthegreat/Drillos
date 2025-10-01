@@ -1,0 +1,46 @@
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "dev": "nodemon --watch 'src/**/*.ts' --exec ts-node src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "dev:worker:notifications": "node dist/notifications/notifications.worker.js",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.899.0",
+    "@fastify/cors": "^11.1.0",
+    "@fastify/swagger": "^9.5.2",
+    "@fastify/swagger-ui": "^5.2.3",
+    "@prisma/client": "^6.16.3",
+    "axios": "^1.12.2",
+    "bullmq": "^5.59.0",
+    "fastify": "^5.6.1",
+    "firebase-admin": "^13.5.0",
+    "form-data": "^4.0.4",
+    "ioredis": "^5.8.0",
+    "node-cron": "^4.2.1",
+    "openai": "^6.0.0",
+    "prisma": "^6.16.3",
+    "rrule": "^2.8.1",
+    "stripe": "^18.5.0",
+    "uuid": "^13.0.0"
+  },
+  "devDependencies": {
+    "@types/dotenv": "^6.1.1",
+    "@types/node": "^24.6.0",
+    "@types/uuid": "^10.0.0",
+    "nodemon": "^3.1.10",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  }
+}
