@@ -1,7 +1,6 @@
 // src/services/brief.service.ts
 import { prisma } from '../utils/db';
 import { habitsService } from './habits.service';
-import { alarmsService } from './alarms.service';
 import { eventsService } from './events.service';
 
 // Mentor personalities
@@ -65,7 +64,12 @@ const mentors = {
 
 export const briefService = {
   async getTodaysBrief(userId: string) {
-    // get habits from DB
+    // get user + mentor choice
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    const mentorKey = (user?.mentorId as keyof typeof mentors) || 'marcus';
+    const mentor = mentors[mentorKey];
+
+    // get habits
     const habits = await habitsService.list(userId);
     const now = new Date();
     const today = now.toDateString();
@@ -94,9 +98,6 @@ export const briefService = {
         message: `${h.title} streak at risk! Don’t break the chain.`,
       }));
 
-    // pick mentor voice (for now default Marcus — later tie to user choice)
-    const mentor = mentors.marcus;
-
     return {
       mentor: mentor.name,
       message: mentor.lines.morning(habits),
@@ -107,14 +108,16 @@ export const briefService = {
   },
 
   async getEveningDebrief(userId: string) {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    const mentorKey = (user?.mentorId as keyof typeof mentors) || 'drill';
+    const mentor = mentors[mentorKey];
+
     const habits = await habitsService.list(userId);
     const today = new Date().toDateString();
 
     const completed = habits.filter(
       (h) => h.lastTick && new Date(h.lastTick).toDateString() === today
     ).length;
-
-    const mentor = mentors.drill; // evening drill sergeant by default for impact
 
     return {
       mentor: mentor.name,
@@ -151,7 +154,6 @@ export const briefService = {
   },
 
   generateReflections(userId: string, habits: any[]) {
-    // Later: use eventsService to analyze
     return [
       `Today you fought ${habits.length} battles.`,
       `Your strongest habit: ${
