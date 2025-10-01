@@ -1,60 +1,66 @@
-import Fastify from 'fastify';
-import cors from '@fastify/cors';
-import swagger from '@fastify/swagger';
-import swaggerUI from '@fastify/swagger-ui';
-import { PrismaClient } from '@prisma/client';
-import Redis from 'ioredis';
+import Fastify from "fastify";
+import cors from "@fastify/cors";
+import swagger from "@fastify/swagger";
+import swaggerUi from "@fastify/swagger-ui";
+import { userController } from "./controllers/user.controller";
 
-import { habitsRoutes } from './controllers/habits.controller';
-import { alarmsRoutes } from './controllers/alarms.controller';
-import { briefRoutes } from './controllers/brief.controller';
+async function buildServer() {
+  const fastify = Fastify({ logger: true });
 
-const server = Fastify({ logger: true });
+  // Middleware
+  await fastify.register(cors, { origin: true });
 
-// === Core Services ===
-export const prisma = new PrismaClient();
-export const redis = new Redis(process.env.REDIS_URL!);
+  // Swagger documentation
+  await fastify.register(swagger, {
+    openapi: {
+      openapi: "3.0.0",
+      info: {
+        title: "DrillSergeant OS API",
+        version: "1.0.0",
+        description: "The Active OS with mentors, habits, alarms, nudges, and memory.",
+      },
+      servers: [{ url: "http://localhost:8080" }],
+      components: {
+        securitySchemes: {
+          bearerAuth: {
+            type: "http",
+            scheme: "bearer",
+            bearerFormat: "JWT",
+          },
+        },
+      },
+    },
+  });
 
-// === Plugins ===
-server.register(cors, { origin: true });
+  await fastify.register(swaggerUi, {
+    routePrefix: "/docs",
+    uiConfig: { docExpansion: "list", deepLinking: true },
+  });
 
-server.register(swagger, {
-  openapi: {
-    openapi: '3.0.0',
-    info: { title: 'DrillSergeant API', version: '1.0.0' },
-    servers: [{ url: process.env.BASE_URL || 'http://localhost:8080' }]
-  }
-});
-server.register(swaggerUI, {
-  routePrefix: '/docs',
-  uiConfig: { docExpansion: 'full', deepLinking: false }
-});
+  // Health check
+  fastify.get("/health", async () => {
+    return { ok: true, message: "🔥 DrillSergeant OS backend is running." };
+  });
 
-// === Routes ===
-server.register(habitsRoutes, { prefix: '/api/v1/habits' });
-server.register(alarmsRoutes, { prefix: '/api/v1/alarms' });
-server.register(briefRoutes, { prefix: '/api/v1/brief' });
+  // Controllers
+  fastify.register(userController);
 
-// === Healthcheck ===
-server.get('/health', async () => ({ ok: true, ts: new Date().toISOString() }));
+  return fastify;
+}
 
-// === Start ===
-const start = async () => {
+async function start() {
   try {
-    await prisma.$connect();
-    console.log('✅ Connected to Postgres');
+    const server = await buildServer();
+    const port = process.env.PORT ? Number(process.env.PORT) : 8080;
+    const host = process.env.HOST || "0.0.0.0";
 
-    await redis.ping();
-    console.log('✅ Connected to Redis');
-
-    await server.listen({ port: Number(process.env.PORT) || 8080, host: '0.0.0.0' });
-    console.log(`🚀 Server running on ${process.env.BASE_URL || 'http://localhost:8080'}`);
+    await server.listen({ port, host });
+    console.log(`🚀 Server running at http://${host}:${port}`);
+    console.log(`📖 API docs available at http://${host}:${port}/docs`);
   } catch (err) {
-    server.log.error(err);
+    console.error("❌ Failed to start server:", err);
     process.exit(1);
   }
-};
+}
 
 start();
-
-export default server;
