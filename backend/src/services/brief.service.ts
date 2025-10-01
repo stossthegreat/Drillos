@@ -1,164 +1,81 @@
-// src/services/brief.service.ts
-import { prisma } from '../utils/db';
-import { habitsService } from './habits.service';
-import { eventsService } from './events.service';
+import { prisma } from "../utils/db";
+import OpenAI from "openai";
+import { VoiceService } from "./voice.service";
+import { HabitsService } from "./habits.service";
 
-// Mentor personalities
-const mentors = {
-  marcus: {
-    id: 'marcus',
-    name: 'Marcus Aurelius',
-    tone: 'stoic',
-    lines: {
-      morning: (habits: any[]) =>
-        `Discipline begins today. ${habits.length} duties await you. Perform them as if your whole life depended on it.`,
-      evening: (completed: number, total: number) =>
-        `Today, you completed ${completed}/${total}. Reflect: Did you act with virtue, or with delay?`,
-    },
-  },
-  drill: {
-    id: 'drill',
-    name: 'Drill Sergeant',
-    tone: 'strict',
-    lines: {
-      morning: (habits: any[]) =>
-        `Listen up! You’ve got ${habits.length} missions. No excuses. No delays. MOVE.`,
-      evening: (completed: number, total: number) =>
-        `Results: ${completed}/${total}. If you slacked, square one. Tomorrow, no mercy.`,
-    },
-  },
-  confucius: {
-    id: 'confucius',
-    name: 'Confucius',
-    tone: 'balanced',
-    lines: {
-      morning: (habits: any[]) =>
-        `A journey of ${habits.length} steps today. Keep order, and balance shall follow.`,
-      evening: (completed: number, total: number) =>
-        `Harmony check: ${completed}/${total} done. Where there is imbalance, correct it.`,
-    },
-  },
-  lincoln: {
-    id: 'lincoln',
-    name: 'Abraham Lincoln',
-    tone: 'inspirational',
-    lines: {
-      morning: (habits: any[]) =>
-        `Self-government begins now. ${habits.length} tasks are your nation. Rule them well.`,
-      evening: (completed: number, total: number) =>
-        `Leadership report: ${completed}/${total} complete. A man is measured by consistency.`,
-    },
-  },
-  buddha: {
-    id: 'buddha',
-    name: 'Buddha',
-    tone: 'light',
-    lines: {
-      morning: (habits: any[]) =>
-        `Be still. ${habits.length} seeds to water today. Each habit, a breath toward awakening.`,
-      evening: (completed: number, total: number) =>
-        `Meditation: ${completed}/${total} complete. Let go of craving. Tomorrow is new.`,
-    },
-  },
-};
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const voiceService = new VoiceService();
+const habitsService = new HabitsService();
 
-export const briefService = {
+export class BriefService {
   async getTodaysBrief(userId: string) {
-    // get user + mentor choice
     const user = await prisma.user.findUnique({ where: { id: userId } });
-    const mentorKey = (user?.mentorId as keyof typeof mentors) || 'marcus';
-    const mentor = mentors[mentorKey];
-
-    // get habits
     const habits = await habitsService.list(userId);
-    const now = new Date();
-    const today = now.toDateString();
 
-    const missions = habits.map((h) => {
-      const doneToday =
-        h.lastTick && new Date(h.lastTick).toDateString() === today;
-      return {
-        id: h.id,
-        title: h.title,
-        streak: h.streak,
-        status: doneToday ? 'completed' : 'pending',
-      };
+    const completed = habits.filter(h => h.status === "completed_today").length;
+    const pending = habits.length - completed;
+
+    const context = `
+User: ${user?.id}
+Mentor: ${user?.mentorId ?? "marcus"}
+Habits: ${habits.map(h => `${h.title} (streak ${h.streak}, status ${h.status})`).join(", ")}
+Stats: ${completed} completed, ${pending} pending
+`;
+
+    const prompt = `
+You are ${user?.mentorId ?? "Marcus Aurelius"}.
+Write a short, powerful morning briefing to this user.
+Tone = strict / stoic / balanced depending on mentor.
+Focus on today's pending habits and streak risks.
+`;
+
+    const ai = await openai.chat.completions.create({
+      model: process.env.OPENAI_MODEL || "gpt-4o-mini",
+      max_tokens: 200,
+      messages: [
+        { role: "system", content: context },
+        { role: "user", content: prompt },
+      ],
     });
 
-    const riskBanners = habits
-      .filter((h) => {
-        const daysSince = h.lastTick
-          ? Math.floor((now.getTime() - new Date(h.lastTick).getTime()) / 86400000)
-          : 999;
-        return daysSince > 1 && h.streak > 5;
-      })
-      .map((h) => ({
-        type: 'streak_save',
-        habitId: h.id,
-        message: `${h.title} streak at risk! Don’t break the chain.`,
-      }));
+    const text = ai.choices[0].message?.content ?? "Begin your mission today.";
+    const voiceUrl = await voiceService.speak(user?.mentorId ?? "marcus", text);
 
     return {
-      mentor: mentor.name,
-      message: mentor.lines.morning(habits),
-      missions,
-      riskBanners,
-      nudges: this.generateNudges(habits, riskBanners.length > 0),
+      mentor: user?.mentorId,
+      message: text,
+      audio: voiceUrl,
+      missions: habits,
     };
-  },
+  }
 
   async getEveningDebrief(userId: string) {
     const user = await prisma.user.findUnique({ where: { id: userId } });
-    const mentorKey = (user?.mentorId as keyof typeof mentors) || 'drill';
-    const mentor = mentors[mentorKey];
-
     const habits = await habitsService.list(userId);
-    const today = new Date().toDateString();
 
-    const completed = habits.filter(
-      (h) => h.lastTick && new Date(h.lastTick).toDateString() === today
-    ).length;
+    const completed = habits.filter(h => h.status === "completed_today").length;
+
+    const prompt = `
+You are ${user?.mentorId ?? "Drill Sergeant"}.
+Write an evening debrief about the user's performance.
+Mention completed ${completed}/${habits.length}.
+Be encouraging but hold them accountable.
+`;
+
+    const ai = await openai.chat.completions.create({
+      model: process.env.OPENAI_MODEL || "gpt-4o-mini",
+      max_tokens: 200,
+      messages: [{ role: "user", content: prompt }],
+    });
+
+    const text = ai.choices[0].message?.content ?? "Reflect and prepare for tomorrow.";
+    const voiceUrl = await voiceService.speak(user?.mentorId ?? "drill", text);
 
     return {
-      mentor: mentor.name,
-      message: mentor.lines.evening(completed, habits.length),
+      mentor: user?.mentorId,
+      message: text,
+      audio: voiceUrl,
       stats: { completed, total: habits.length },
-      reflections: this.generateReflections(userId, habits),
     };
-  },
-
-  generateNudges(habits: any[], hasRisks: boolean) {
-    const nudges: any[] = [];
-    if (hasRisks) {
-      nudges.push({
-        type: 'streak_save',
-        title: 'Save Your Streak',
-        message: 'One habit slipping. Get back on it now.',
-        priority: 'high',
-      });
-    }
-    const undone = habits.filter(
-      (h) =>
-        !h.lastTick ||
-        new Date(h.lastTick).toDateString() !== new Date().toDateString()
-    );
-    if (undone.length > 0) {
-      nudges.push({
-        type: 'daily_reminder',
-        title: 'Habits pending',
-        message: `${undone.length} still incomplete.`,
-        priority: 'medium',
-      });
-    }
-    return nudges;
-  },
-
-  generateReflections(userId: string, habits: any[]) {
-    return [
-      `Today you fought ${habits.length} battles.`,
-      `Your strongest habit: ${
-        habits.sort((a, b) => b.streak - a.streak)[0]?.title || 'None'
-      }.`,
-    ];
-  },
-};
+  }
+}
