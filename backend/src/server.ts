@@ -1,3 +1,4 @@
+// src/server.ts
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import swagger from '@fastify/swagger';
@@ -20,9 +21,13 @@ import { briefController } from './controllers/brief.controller';
 import { voiceController } from './controllers/voice.controller';
 import { userController } from './controllers/user.controller';
 
+// schedulers
+import { bootstrapSchedulers } from './jobs/scheduler';
+
 // load .env
 dotenv.config();
 
+// ✅ Validate env vars before boot
 function validateEnv() {
   const required = [
     'DATABASE_URL',
@@ -53,41 +58,28 @@ function validateEnv() {
   console.log('✅ Env vars validated.');
 }
 
-// Startup check logic
+// ✅ Startup integration checks
 async function runStartupChecks() {
   const results: Record<string, any> = {};
+  try {
+    await prisma.$queryRaw`SELECT 1`; results.postgres = 'ok';
+  } catch (e: any) { results.postgres = `error: ${e.message}`; }
 
   try {
-    await prisma.$queryRaw`SELECT 1`;
-    results.postgres = 'ok';
-  } catch (e: any) {
-    results.postgres = `error: ${e.message}`;
-  }
-
-  try {
-    await redis.ping();
-    results.redis = 'ok';
-  } catch (e: any) {
-    results.redis = `error: ${e.message}`;
-  }
+    await redis.ping(); results.redis = 'ok';
+  } catch (e: any) { results.redis = `error: ${e.message}`; }
 
   try {
     const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-    await client.models.list();
-    results.openai = 'ok';
-  } catch (e: any) {
-    results.openai = `error: ${e.message}`;
-  }
+    await client.models.list(); results.openai = 'ok';
+  } catch (e: any) { results.openai = `error: ${e.message}`; }
 
   try {
     const res = await fetch('https://api.elevenlabs.io/v1/voices', {
       headers: { 'xi-api-key': process.env.ELEVENLABS_API_KEY! },
     });
-    if (res.ok) results.elevenlabs = 'ok';
-    else throw new Error(await res.text());
-  } catch (e: any) {
-    results.elevenlabs = `error: ${e.message}`;
-  }
+    results.elevenlabs = res.ok ? 'ok' : 'error';
+  } catch (e: any) { results.elevenlabs = `error: ${e.message}`; }
 
   try {
     if (!admin.apps.length) {
@@ -99,28 +91,23 @@ async function runStartupChecks() {
         }),
       });
     }
-    await admin.app().options.projectId; // quick check
     results.firebase = 'ok';
-  } catch (e: any) {
-    results.firebase = `error: ${e.message}`;
-  }
+  } catch (e: any) { results.firebase = `error: ${e.message}`; }
 
   try {
     const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2022-11-15' });
     await stripe.accounts.retrieve();
     results.stripe = 'ok';
-  } catch (e: any) {
-    results.stripe = `error: ${e.message}`;
-  }
+  } catch (e: any) { results.stripe = `error: ${e.message}`; }
 
   return results;
 }
 
+// ✅ Build Fastify server
 const buildServer = () => {
   const fastify = Fastify({ logger: true });
 
   fastify.register(cors, { origin: true });
-
   fastify.register(swagger, {
     openapi: {
       openapi: '3.0.0',
@@ -130,9 +117,8 @@ const buildServer = () => {
   });
   fastify.register(swaggerUI, { routePrefix: '/docs', uiConfig: { docExpansion: 'full', deepLinking: false } });
 
+  // health + startup-check
   fastify.get('/health', async () => ({ ok: true, ts: new Date().toISOString() }));
-
-  // new: startup-check
   fastify.get('/startup-check', async () => {
     const checks = await runStartupChecks();
     return { ok: Object.values(checks).every((v) => v === 'ok'), checks };
@@ -151,6 +137,7 @@ const buildServer = () => {
   return fastify;
 };
 
+// ✅ Start server
 const start = async () => {
   validateEnv();
   const server = buildServer();
@@ -160,10 +147,22 @@ const start = async () => {
     console.log(`🚀 HabitOS API running at ${process.env.BACKEND_PUBLIC_URL || `http://localhost:${port}`}`);
     console.log('📖 Docs available at /docs');
     console.log('🩺 Run /startup-check to verify integrations');
+
+    // 🚀 Boot schedulers AFTER server is ready
+    await bootstrapSchedulers();
+    console.log('⏰ OS schedulers started: alarms + daily briefs');
   } catch (err) {
     server.log.error(err);
     process.exit(1);
   }
 };
+
+// ✅ Graceful shutdown
+process.on('SIGINT', async () => {
+  console.log('⏹️ Shutting down gracefully...');
+  await prisma.$disconnect();
+  await redis.quit();
+  process.exit(0);
+});
 
 start();
