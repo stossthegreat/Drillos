@@ -1,28 +1,30 @@
-import { FastifyInstance } from 'fastify';
-import { StreaksService } from '../services/streaks.service';
+import { FastifyInstance } from "fastify";
+import { StreaksService } from "../services/streaks.service";
 
 export async function streaksController(fastify: FastifyInstance) {
   const streaksService = new StreaksService();
 
-  fastify.get('/v1/streaks/achievements', {
-    schema: {
-      tags: ['Streaks'],
-      summary: 'Get user achievements',
-      response: { 200: { type: 'object' } }
+  // ✅ Get streak summary
+  fastify.get("/api/v1/streaks/summary", async (req: any, reply) => {
+    try {
+      const userId = req.user?.id || req.headers["x-user-id"];
+      if (!userId) return reply.code(401).send({ error: "Unauthorized" });
+
+      return await streaksService.getStreakSummary(userId);
+    } catch (err: any) {
+      return reply.code(500).send({ error: err.message });
     }
-  }, async (request: any) => {
-    const userId = request.user?.id || 'demo-user';
-    return streaksService.getUserAchievements(userId);
   });
 
-  fastify.get('/v1/streaks/summary', {
-    schema: {
-      tags: ['Streaks'],
-      summary: 'Get streak summary',
-      response: { 200: { type: 'object' } }
+  // ✅ Get user achievements
+  fastify.get("/api/v1/streaks/achievements", async (req: any, reply) => {
+    try {
+      const userId = req.user?.id || req.headers["x-user-id"];
+      if (!userId) return reply.code(401).send({ error: "Unauthorized" });
+
+      return await streaksService.getUserAchievements(userId);
+    } catch (err: any) {
+      return reply.code(500).send({ error: err.message });
     }
-  }, async (request: any) => {
-    const userId = request.user?.id || 'demo-user';
-    return streaksService.getStreakSummary(userId);
   });
 }
