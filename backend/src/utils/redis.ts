@@ -1,32 +1,66 @@
 // src/utils/redis.ts
-import IORedis from 'ioredis';
+import IORedis, { Redis } from 'ioredis';
+import { ENV, isDev } from './env';
+import { logger } from './logger';
 
-const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
+let client: Redis | null = null;
 
-let redis: IORedis;
-
-declare global {
-  // eslint-disable-next-line no-var
-  var __redis__: IORedis | undefined;
-}
-
-if (process.env.NODE_ENV !== 'production') {
-  if (!global.__redis__) {
-    global.__redis__ = new IORedis(REDIS_URL, {
-      lazyConnect: false,
-      maxRetriesPerRequest: 2,
-    });
-  }
-  redis = global.__redis__;
-} else {
-  redis = new IORedis(REDIS_URL, {
+function makeClient(): Redis {
+  const c = new IORedis(ENV.REDIS_URL, {
     lazyConnect: false,
     maxRetriesPerRequest: 2,
+    enableOfflineQueue: false,
   });
+
+  c.on('connect', () => logger.info({ url: maskRedis(ENV.REDIS_URL) }, '🔌 Redis connected'));
+  c.on('error', (err) => logger.error({ err }, '🔴 Redis error'));
+  c.on('reconnecting', () => logger.warn('Redis reconnecting…'));
+  c.on('end', () => logger.warn('Redis connection closed'));
+
+  return c;
 }
 
-redis.on('error', (err) => {
-  console.error('🔴 Redis error:', err?.message || err);
-});
+export function getRedis(): Redis {
+  if (!client) {
+    // reuse in dev hot-reload
+    const g = global as any;
+    if (isDev && g.__redis__) {
+      client = g.__redis__ as Redis;
+    } else {
+      client = makeClient();
+      if (isDev) (global as any).__redis__ = client;
+    }
+  }
+  return client!;
+}
 
-export { redis };
+export async function redisHealthCheck(): Promise<boolean> {
+  try {
+    const c = getRedis();
+    const pong = await c.ping();
+    return pong === 'PONG';
+  } catch {
+    return false;
+  }
+}
+
+export async function closeRedis(): Promise<void> {
+  if (client) {
+    try {
+      await client.quit();
+    } catch {
+      await client.disconnect();
+    }
+    client = null;
+  }
+}
+
+function maskRedis(url: string) {
+  try {
+    const u = new URL(url);
+    if (u.password) u.password = '***';
+    return u.toString();
+  } catch {
+    return 'redis://***';
+  }
+}
