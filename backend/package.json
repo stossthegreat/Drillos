@@ -6,17 +6,17 @@
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
     "build": "tsc",
-    "start": "prisma migrate deploy && node dist/server.js",
+    "postinstall": "prisma generate",
+    "start": "npm run build && prisma migrate deploy && node dist/server.js",
     "worker:notifications": "node dist/notifications/notifications.worker.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
-    "test": "echo \"No test setup\" && exit 0"
+    "test": "echo \"No tests configured\" && exit 0"
   },
-  "keywords": ["fastify", "habit-os", "drill-sergeant", "ai", "backend"],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.899.0",
     "@fastify/cors": "^11.1.0",
