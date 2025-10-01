@@ -1,0 +1,22 @@
+model User {
+  id           String    @id @default(cuid())
+  email        String?   @unique
+  tz           String    @default("Europe/London")
+  tone         Tone      @default(balanced)
+  intensity    Int       @default(2)
+  consentRoast Boolean   @default(false)
+  safeWord     String?
+  plan         Plan      @default(FREE)
+  mentorId     String    @default("marcus")   // 👈 NEW: chosen mentor
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  // Relations
+  habits       Habit[]
+  antiHabits   AntiHabit[]
+  alarms       Alarm[]
+  events       Event[]
+  userFacts    UserFacts?
+
+  @@map("users")
+}
