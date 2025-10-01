@@ -2,12 +2,7 @@
 builder = "NIXPACKS"
 
 [deploy]
-# Command Railway runs to build your app
 build = "npm install && npm run build"
-
-# Command Railway runs to start your app
 start = "npm start"
-
-# Optional: healthcheck for deploy
 healthcheckPath = "/health"
 healthcheckTimeout = 300
