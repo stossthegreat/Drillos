@@ -2,9 +2,7 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import swagger from '@fastify/swagger';
 import swaggerUI from '@fastify/swagger-ui';
-import { prisma } from './utils/db';
-import { redis } from './utils/redis';
-import { checkQueueHealth, closeAllQueues } from './utils/queues';
+import dotenv from 'dotenv';
 
 // controllers
 import { habitsController } from './controllers/habits.controller';
@@ -16,24 +14,50 @@ import { briefController } from './controllers/brief.controller';
 import { voiceController } from './controllers/voice.controller';
 import { userController } from './controllers/user.controller';
 
+// load .env
+dotenv.config();
+
+function validateEnv() {
+  const required = [
+    'DATABASE_URL',
+    'REDIS_URL',
+    'OPENAI_API_KEY',
+    'OPENAI_MODEL',
+    'ELEVENLABS_API_KEY',
+    'ELEVENLABS_VOICE_MARCUS',
+    'ELEVENLABS_VOICE_DRILL',
+    'ELEVENLABS_VOICE_CONFUCIUS',
+    'ELEVENLABS_VOICE_LINCOLN',
+    'ELEVENLABS_VOICE_BUDDHA',
+    'FIREBASE_PROJECT_ID',
+    'FIREBASE_CLIENT_EMAIL',
+    'FIREBASE_PRIVATE_KEY',
+    'STRIPE_SECRET_KEY',
+    'STRIPE_WEBHOOK_SECRET',
+    'S3_ENDPOINT',
+    'S3_BUCKET',
+    'S3_ACCESS_KEY',
+    'S3_SECRET_KEY',
+  ];
+
+  const missing = required.filter((key) => !process.env[key]);
+  if (missing.length > 0) {
+    console.error('❌ Missing required env vars:', missing.join(', '));
+    process.exit(1);
+  }
+
+  console.log('✅ Env vars validated.');
+}
+
 const buildServer = () => {
   const fastify = Fastify({
-    logger: {
-      transport: {
-        target: 'pino-pretty',
-        options: { translateTime: 'SYS:standard', ignore: 'pid,hostname' },
-      },
-    },
-    trustProxy: true,
+    logger: true,
   });
 
-  // CORS
-  fastify.register(cors, {
-    origin: process.env.CORS_ORIGIN?.split(',') || '*',
-    credentials: true,
-  });
+  // enable CORS
+  fastify.register(cors, { origin: true });
 
-  // Swagger docs
+  // swagger docs
   fastify.register(swagger, {
     openapi: {
       openapi: '3.0.0',
@@ -47,59 +71,41 @@ const buildServer = () => {
   });
   fastify.register(swaggerUI, {
     routePrefix: '/docs',
-    uiConfig: { docExpansion: 'list', deepLinking: true },
+    uiConfig: { docExpansion: 'full', deepLinking: false },
   });
 
-  // Health endpoints
-  fastify.get('/health', async () => ({ ok: true, ts: new Date().toISOString() }));
-  fastify.get('/ready', async () => {
-    try {
-      await prisma.$queryRaw`SELECT 1`;
-      await redis.ping();
-      const queues = await checkQueueHealth();
-      return { ok: true, db: true, redis: true, queues };
-    } catch (err: any) {
-      return { ok: false, error: err.message || String(err) };
-    }
-  });
+  // health
+  fastify.get('/health', async () => ({
+    ok: true,
+    ts: new Date().toISOString(),
+  }));
 
-  // Controllers (API routes)
-  fastify.register(habitsController, { prefix: '/api/v1' });
-  fastify.register(alarmsController, { prefix: '/api/v1' });
-  fastify.register(streaksController, { prefix: '/api/v1' });
-  fastify.register(eventsController, { prefix: '/api/v1' });
-  fastify.register(nudgesController, { prefix: '/api/v1' });
-  fastify.register(briefController, { prefix: '/api/v1' });
-  fastify.register(voiceController, { prefix: '/api/v1' });
-  fastify.register(userController, { prefix: '/api/v1' });
+  // controllers
+  fastify.register(habitsController);
+  fastify.register(alarmsController);
+  fastify.register(streaksController);
+  fastify.register(eventsController);
+  fastify.register(nudgesController);
+  fastify.register(briefController);
+  fastify.register(voiceController);
+  fastify.register(userController);
 
   return fastify;
 };
 
 const start = async () => {
-  const server = buildServer();
-  const port = Number(process.env.PORT) || 8080;
-  const host = process.env.HOST || '0.0.0.0';
+  validateEnv();
 
+  const server = buildServer();
   try {
-    await server.listen({ port, host });
-    console.log(`🚀 HabitOS API running at http://${host}:${port}`);
-    console.log(`📖 Swagger docs at http://${host}:${port}/docs`);
+    const port = process.env.PORT ? Number(process.env.PORT) : 8080;
+    await server.listen({ port, host: process.env.HOST || '0.0.0.0' });
+    console.log(`🚀 HabitOS API running at ${process.env.BACKEND_PUBLIC_URL || `http://localhost:${port}`}`);
+    console.log('📖 Docs available at /docs');
   } catch (err) {
     server.log.error(err);
     process.exit(1);
   }
-
-  // Graceful shutdown
-  const shutdown = async () => {
-    console.log('🛑 Shutting down gracefully...');
-    await closeAllQueues();
-    await prisma.$disconnect();
-    await redis.quit();
-    process.exit(0);
-  };
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
 };
 
 start();
