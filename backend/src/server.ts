@@ -1,66 +1,67 @@
-import Fastify from "fastify";
-import cors from "@fastify/cors";
-import swagger from "@fastify/swagger";
-import swaggerUi from "@fastify/swagger-ui";
-import { userController } from "./controllers/user.controller";
+import Fastify from 'fastify';
+import cors from '@fastify/cors';
+import swagger from '@fastify/swagger';
+import swaggerUI from '@fastify/swagger-ui';
 
-async function buildServer() {
-  const fastify = Fastify({ logger: true });
+// controllers
+import { habitsController } from './controllers/habits.controller';
+import { alarmsController } from './controllers/alarms.controller';
+import { streaksController } from './controllers/streaks.controller';
+import { eventsController } from './controllers/events.controller';
+import { nudgesController } from './controllers/nudges.controller';
+import { briefController } from './controllers/brief.controller';
+import { voiceController } from './controllers/voice.controller';
 
-  // Middleware
-  await fastify.register(cors, { origin: true });
+const buildServer = () => {
+  const fastify = Fastify({
+    logger: true
+  });
 
-  // Swagger documentation
-  await fastify.register(swagger, {
+  // enable CORS
+  fastify.register(cors, { origin: true });
+
+  // swagger docs
+  fastify.register(swagger, {
     openapi: {
-      openapi: "3.0.0",
+      openapi: '3.0.0',
       info: {
-        title: "DrillSergeant OS API",
-        version: "1.0.0",
-        description: "The Active OS with mentors, habits, alarms, nudges, and memory.",
+        title: 'HabitOS API',
+        version: '1.0.0',
+        description: 'The full-scale DrillSergeant / HabitOS API'
       },
-      servers: [{ url: "http://localhost:8080" }],
-      components: {
-        securitySchemes: {
-          bearerAuth: {
-            type: "http",
-            scheme: "bearer",
-            bearerFormat: "JWT",
-          },
-        },
-      },
-    },
+      servers: [{ url: 'http://localhost:8080' }]
+    }
+  });
+  fastify.register(swaggerUI, {
+    routePrefix: '/docs',
+    uiConfig: { docExpansion: 'full', deepLinking: false }
   });
 
-  await fastify.register(swaggerUi, {
-    routePrefix: "/docs",
-    uiConfig: { docExpansion: "list", deepLinking: true },
-  });
+  // health
+  fastify.get('/health', async () => ({ ok: true, ts: new Date().toISOString() }));
 
-  // Health check
-  fastify.get("/health", async () => {
-    return { ok: true, message: "🔥 DrillSergeant OS backend is running." };
-  });
-
-  // Controllers
-  fastify.register(userController);
+  // controllers
+  fastify.register(habitsController);
+  fastify.register(alarmsController);
+  fastify.register(streaksController);
+  fastify.register(eventsController);
+  fastify.register(nudgesController);
+  fastify.register(briefController);
+  fastify.register(voiceController);
 
   return fastify;
-}
+};
 
-async function start() {
+const start = async () => {
+  const server = buildServer();
   try {
-    const server = await buildServer();
-    const port = process.env.PORT ? Number(process.env.PORT) : 8080;
-    const host = process.env.HOST || "0.0.0.0";
-
-    await server.listen({ port, host });
-    console.log(`🚀 Server running at http://${host}:${port}`);
-    console.log(`📖 API docs available at http://${host}:${port}/docs`);
+    await server.listen({ port: process.env.PORT ? Number(process.env.PORT) : 8080, host: '0.0.0.0' });
+    console.log('🚀 HabitOS API running at http://localhost:8080');
+    console.log('📖 Docs available at http://localhost:8080/docs');
   } catch (err) {
-    console.error("❌ Failed to start server:", err);
+    server.log.error(err);
     process.exit(1);
   }
-}
+};
 
 start();
