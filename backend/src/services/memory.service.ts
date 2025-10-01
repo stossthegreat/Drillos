@@ -1,101 +1,194 @@
 // src/services/memory.service.ts
-import { prisma } from "../utils/db";
+import { prisma } from '../utils/db';
+import { redis } from '../utils/redis';
+import { Prisma } from '@prisma/client';
+import OpenAI from 'openai';
+import { MENTORS } from '../config/mentors.config';
 
-/**
- * Durable long-term memory over Postgres (UserFacts.json).
- * - get(): returns entire JSON blob
- * - merge(): deep merge partial facts
- * - learnFromEvent(): updates memory based on event signal (simple rule-based starter)
- */
+const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+const LLM_MAX_TOKENS = Number(process.env.LLM_MAX_TOKENS || 400);
+const LLM_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS || 10000);
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+  timeout: LLM_TIMEOUT_MS,
+});
+
+type FactsPatch = Record<string, any>;
+type EventPayload = Record<string, any>;
+
 export class MemoryService {
-  async get(userId: string): Promise<Record<string, any>> {
-    const uf = await prisma.userFacts.findUnique({ where: { userId } });
-    return (uf?.json as any) || {};
-  }
-
-  async replace(userId: string, full: Record<string, any>) {
-    await prisma.userFacts.upsert({
-      where: { userId },
-      create: { userId, json: full },
-      update: { json: full },
+  /**
+   * Append a raw event to the event stream (source of truth for memory).
+   */
+  async appendEvent(userId: string, type: string, payload: EventPayload) {
+    return prisma.event.create({
+      data: { userId, type, payload },
     });
-    await prisma.event.create({
-      data: { userId, type: "memory_replace", payload: { size: Object.keys(full || {}).length } },
-    });
-    return { ok: true };
-  }
-
-  async merge(userId: string, partial: Record<string, any>) {
-    const current = await this.get(userId);
-    const next = deepMerge(current, partial);
-
-    await prisma.userFacts.upsert({
-      where: { userId },
-      create: { userId, json: next },
-      update: { json: next },
-    });
-
-    await prisma.event.create({
-      data: { userId, type: "memory_merge", payload: { keys: Object.keys(partial) } },
-    });
-
-    return next;
   }
 
   /**
-   * Update memory from raw user events (starter rules):
-   * - If habit_tick on same habit increases streak >= 7, mark as "habit_is_forming"
-   * - If repeated "habit_missed", mark "danger_windows"
+   * Merge/patch long-term user facts (JSON) with a deep merge.
+   * Stores in UserFacts.json.
    */
-  async learnFromEvent(userId: string, event: { type: string; payload: any }) {
-    const mem = await this.get(userId);
-    if (!mem.habits) mem.habits = {};
-
-    if (event.type === "habit_tick" && event.payload?.habitId) {
-      const hid = event.payload.habitId;
-      const streak = event.payload.nextStreak ?? event.payload.streak;
-      if (!mem.habits[hid]) mem.habits[hid] = {};
-      mem.habits[hid].last_tick_date = event.payload.date;
-      mem.habits[hid].streak = streak;
-      if (typeof streak === "number" && streak >= 7) {
-        mem.habits[hid].habit_is_forming = true;
-      }
+  async upsertFacts(userId: string, patch: FactsPatch) {
+    const existing = await prisma.userFacts.findUnique({ where: { userId } });
+    if (!existing) {
+      return prisma.userFacts.create({
+        data: { userId, json: patch as Prisma.InputJsonValue },
+      });
     }
-
-    if (event.type === "habit_missed" && event.payload?.habitId) {
-      const hid = event.payload.habitId;
-      if (!mem.habits[hid]) mem.habits[hid] = {};
-      mem.habits[hid].missed_count = (mem.habits[hid].missed_count || 0) + 1;
-      if (!mem.danger_windows) mem.danger_windows = [];
-      const ts = new Date().toISOString();
-      mem.danger_windows.push({ when: ts, reason: "habit_missed", habitId: hid });
-    }
-
-    await prisma.userFacts.upsert({
+    const merged = this.deepMerge(existing.json as Record<string, any>, patch);
+    return prisma.userFacts.update({
       where: { userId },
-      create: { userId, json: mem },
-      update: { json: mem },
+      data: { json: merged as Prisma.InputJsonValue },
     });
-
-    await prisma.event.create({
-      data: { userId, type: "memory_learn", payload: { fromEvent: event.type } },
-    });
-
-    return mem;
   }
-}
 
-function deepMerge(a: any, b: any): any {
-  if (Array.isArray(a) && Array.isArray(b)) return b; // replace arrays
-  if (isObject(a) && isObject(b)) {
-    const out: any = { ...a };
-    for (const k of Object.keys(b)) out[k] = deepMerge(a[k], b[k]);
+  /**
+   * Fetch a compact context for AI: recent events, core facts, and rolling stats.
+   */
+  async getUserContext(userId: string) {
+    const facts = await prisma.userFacts.findUnique({ where: { userId } });
+    const recentEvents = await prisma.event.findMany({
+      where: { userId },
+      orderBy: { ts: 'desc' },
+      take: 100,
+    });
+
+    // Rolling stats: last 30 days habit ticks, misses, most common times, etc.
+    const since = new Date();
+    since.setDate(since.getDate() - 30);
+
+    const recentTicks = await prisma.event.findMany({
+      where: {
+        userId,
+        type: 'habit_tick',
+        ts: { gte: since },
+      },
+      orderBy: { ts: 'desc' },
+      take: 1000,
+    });
+
+    const perHabit: Record<string, { ticks: number; lastDate: string | null }> = {};
+    for (const ev of recentTicks) {
+      const hid = (ev.payload as any)?.habitId;
+      if (!hid) continue;
+      perHabit[hid] = perHabit[hid] || { ticks: 0, lastDate: null };
+      perHabit[hid].ticks += 1;
+      perHabit[hid].lastDate = (ev.payload as any)?.date || perHabit[hid].lastDate;
+    }
+
+    const habits = await prisma.habit.findMany({ where: { userId } });
+    const habitSummaries = habits.map((h) => ({
+      id: h.id,
+      title: h.title,
+      streak: h.streak,
+      lastTick: h.lastTick,
+      ticks30d: perHabit[h.id]?.ticks || 0,
+    }));
+
+    return {
+      facts: (facts?.json as Record<string, any>) || {},
+      recentEvents,
+      habitSummaries,
+    };
+  }
+
+  /**
+   * Summarize the user's last 24h into a compact fact update and reflection.
+   * This is called by the evening loop and applied to memory.
+   */
+  async summarizeDay(userId: string) {
+    // cache-key to avoid double-charge if retried
+    const cacheKey = `mem:summary:${userId}:${new Date().toISOString().slice(0, 10)}`;
+    const cached = await redis.get(cacheKey);
+    if (cached) return JSON.parse(cached);
+
+    const context = await this.getUserContext(userId);
+
+    const system = [
+      `You are the memory engine for a discipline OS.`,
+      `Input: user facts, recent events, and habit summaries.`,
+      `Output: JSON with:`,
+      `  - "factsPatch": concise updates to persistent memory (e.g. bestTimes, weakDays, preferredTone, triggers)`,
+      `  - "reflection": 1-2 sentence narrative reflection on the day (short, powerful, mentor-agnostic)`,
+      `Keep it compact and strictly valid JSON.`,
+    ].join('\n');
+
+    const user = {
+      facts: context.facts,
+      habitSummaries: context.habitSummaries,
+      recentEvents: context.recentEvents.slice(0, 60).map(e => ({
+        ts: e.ts,
+        type: e.type,
+        payload: e.payload,
+      })),
+    };
+
+    const completion = await openai.chat.completions.create({
+      model: OPENAI_MODEL,
+      temperature: 0.2,
+      max_tokens: LLM_MAX_TOKENS,
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: JSON.stringify(user) },
+      ],
+      response_format: { type: 'json_object' as any },
+    });
+
+    const raw = completion.choices[0]?.message?.content || '{}';
+    let parsed: { factsPatch?: Record<string, any>; reflection?: string } = {};
+    try { parsed = JSON.parse(raw); } catch { parsed = { factsPatch: {}, reflection: '' }; }
+
+    const patch = parsed.factsPatch || {};
+    if (Object.keys(patch).length) {
+      await this.upsertFacts(userId, patch);
+      await this.appendEvent(userId, 'memory_updated', { patch });
+    }
+    if (parsed.reflection) {
+      await this.appendEvent(userId, 'day_reflection', { text: parsed.reflection });
+    }
+
+    const out = { patch, reflection: parsed.reflection || '' };
+    await redis.set(cacheKey, JSON.stringify(out), 'EX', 60 * 60 * 6);
     return out;
   }
-  return b === undefined ? a : b;
-}
-function isObject(x: any) {
-  return x && typeof x === "object" && !Array.isArray(x);
+
+  /**
+   * Small helper so mentors can retrieve a concise long-term profile.
+   */
+  async getProfileForMentor(userId: string) {
+    const factsRow = await prisma.userFacts.findUnique({ where: { userId } });
+    const facts = (factsRow?.json as Record<string, any>) || {};
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+
+    return {
+      tz: user?.tz || 'UTC',
+      tone: user?.tone || 'balanced',
+      intensity: user?.intensity || 2,
+      plan: user?.plan || 'FREE',
+      bestTimes: facts.bestTimes || null,
+      weakDays: facts.weakDays || null,
+      triggers: facts.triggers || null,
+      preferredRituals: facts.preferredRituals || null,
+      lastReflection: facts.lastReflection || null,
+    };
+  }
+
+  private deepMerge(a: Record<string, any>, b: Record<string, any>) {
+    const out = { ...a };
+    for (const k of Object.keys(b)) {
+      const av = (a as any)[k];
+      const bv = (b as any)[k];
+      if (av && typeof av === 'object' && !Array.isArray(av) && typeof bv === 'object' && !Array.isArray(bv)) {
+        (out as any)[k] = this.deepMerge(av, bv);
+      } else {
+        (out as any)[k] = bv;
+      }
+    }
+    return out;
+  }
 }
 
 export const memoryService = new MemoryService();
