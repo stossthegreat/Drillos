@@ -1,0 +1,21 @@
+# Use Node.js LTS
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+COPY tsconfig.json ./
+COPY prisma ./prisma
+
+# Install deps
+RUN npm install
+
+# Copy source
+COPY . .
+
+# Build TypeScript
+RUN npm run build
+
+# Run migrations automatically
+CMD npx prisma migrate deploy && node dist/server.js
