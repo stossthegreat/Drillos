@@ -1,114 +1,66 @@
+// src/utils/queues.ts
 import { Queue } from 'bullmq';
-import { redisClient } from './redis';
+import type { QueueOptions, JobsOptions } from 'bullmq';
+import { getRedis } from './redis';
 
-// Queue names
 export const QUEUE_NAMES = {
   EMAIL: 'email',
   NOTIFICATION: 'notification',
   ANALYTICS: 'analytics',
   VOICE: 'voice',
+  HABIT_LOOP: 'habit-loop',
 } as const;
 
-// Job types
-export const JOB_TYPES = {
-  SEND_EMAIL: 'send-email',
-  SEND_NOTIFICATION: 'send-notification',
-  PROCESS_ANALYTICS: 'process-analytics',
-  GENERATE_VOICE: 'generate-voice',
-} as const;
+const connection = getRedis();
 
-// Queue instances
-export const emailQueue = new Queue(QUEUE_NAMES.EMAIL, {
-  connection: redisClient.getClient(),
+const defaultOpts = (removeOnComplete = 100, removeOnFail = 50): QueueOptions & { defaultJobOptions: JobsOptions } => ({
+  connection,
   defaultJobOptions: {
-    removeOnComplete: 100,
-    removeOnFail: 50,
     attempts: 3,
-    backoff: {
-      type: 'exponential',
-      delay: 2000,
-    },
+    backoff: { type: 'exponential', delay: 2000 },
+    removeOnComplete,
+    removeOnFail,
   },
 });
 
-export const notificationQueue = new Queue(QUEUE_NAMES.NOTIFICATION, {
-  connection: redisClient.getClient(),
-  defaultJobOptions: {
-    removeOnComplete: 100,
-    removeOnFail: 50,
-    attempts: 3,
-    backoff: {
-      type: 'exponential',
-      delay: 2000,
-    },
-  },
-});
-
+export const emailQueue = new Queue(QUEUE_NAMES.EMAIL, defaultOpts(100, 50));
+export const notificationQueue = new Queue(QUEUE_NAMES.NOTIFICATION, defaultOpts(100, 50));
 export const analyticsQueue = new Queue(QUEUE_NAMES.ANALYTICS, {
-  connection: redisClient.getClient(),
+  ...defaultOpts(50, 25),
   defaultJobOptions: {
+    attempts: 2,
+    backoff: { type: 'fixed', delay: 5000 },
     removeOnComplete: 50,
     removeOnFail: 25,
-    attempts: 2,
-    backoff: {
-      type: 'fixed',
-      delay: 5000,
-    },
   },
 });
+export const voiceQueue = new Queue(QUEUE_NAMES.VOICE, defaultOpts(20, 10));
+export const habitLoopQueue = new Queue(QUEUE_NAMES.HABIT_LOOP, defaultOpts(200, 50));
 
-export const voiceQueue = new Queue(QUEUE_NAMES.VOICE, {
-  connection: redisClient.getClient(),
-  defaultJobOptions: {
-    removeOnComplete: 20,
-    removeOnFail: 10,
-    attempts: 2,
-    backoff: {
-      type: 'exponential',
-      delay: 3000,
-    },
-  },
-});
-
-// Queue health check
 export async function checkQueueHealth(): Promise<Record<string, boolean>> {
-  const queues = [
-    { name: 'email', queue: emailQueue },
-    { name: 'notification', queue: notificationQueue },
-    { name: 'analytics', queue: analyticsQueue },
-    { name: 'voice', queue: voiceQueue },
-  ];
+  const result: Record<string, boolean> = {};
+  const entries = [
+    ['email', emailQueue],
+    ['notification', notificationQueue],
+    ['analytics', analyticsQueue],
+    ['voice', voiceQueue],
+    ['habit-loop', habitLoopQueue],
+  ] as const;
 
-  const health: Record<string, boolean> = {};
+  await Promise.all(
+    entries.map(async ([name, q]) => {
+      try {
+        await q.getWaiting(); // ping
+        result[name] = true;
+      } catch {
+        result[name] = false;
+      }
+    }),
+  );
 
-  for (const { name, queue } of queues) {
-    try {
-      await queue.getWaiting();
-      health[name] = true;
-    } catch (error) {
-      console.error(`Queue ${name} health check failed:`, error);
-      health[name] = false;
-    }
-  }
-
-  return health;
+  return result;
 }
 
-// Close all queues
 export async function closeAllQueues(): Promise<void> {
-  await Promise.all([
-    emailQueue.close(),
-    notificationQueue.close(),
-    analyticsQueue.close(),
-    voiceQueue.close(),
-  ]);
+  await Promise.all([emailQueue.close(), notificationQueue.close(), analyticsQueue.close(), voiceQueue.close(), habitLoopQueue.close()]);
 }
-
-export default {
-  emailQueue,
-  notificationQueue,
-  analyticsQueue,
-  voiceQueue,
-  checkQueueHealth,
-  closeAllQueues,
-};
