@@ -1,21 +1,16 @@
 {
   "name": "backend",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "main": "dist/server.js",
   "scripts": {
-    "dev": "nodemon --watch 'src/**/*.ts' --exec ts-node src/server.ts",
+    "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
-    "dev:worker:notifications": "node dist/notifications/notifications.worker.js",
+    "worker:notifications": "node dist/notifications/notifications.worker.js",
     "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev",
+    "prisma:migrate": "prisma migrate deploy",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
   "dependencies": {
     "@aws-sdk/client-s3": "^3.899.0",
     "@fastify/cors": "^11.1.0",
@@ -39,8 +34,7 @@
     "@types/dotenv": "^6.1.1",
     "@types/node": "^24.6.0",
     "@types/uuid": "^10.0.0",
-    "nodemon": "^3.1.10",
-    "ts-node": "^10.9.2",
+    "ts-node-dev": "^2.0.0",
     "typescript": "^5.9.3"
   }
 }
