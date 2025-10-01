@@ -1,16 +1,11 @@
 // src/services/alarms.service.ts
 import { prisma } from '../utils/db';
 import { redis } from '../utils/redis';
+import { voiceService } from './voice.service';
+import { notificationsService } from './notifications.service';
 
 /**
- * Very small RRULE parser with sane defaults.
- * Supports:
- *   - FREQ=DAILY
- *   - FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR,SA,SU
- *   - BYHOUR=H;BYMINUTE=M
- *   - FREQ=ONCE;DTSTART=ISO
- *
- * Returns the next Date after `from`, or null when not computable.
+ * RRULE parser for daily/weekly/once.
  */
 function computeNextRun(rrule: string, from = new Date()): Date | null {
   const parts = Object.fromEntries(
@@ -27,8 +22,8 @@ function computeNextRun(rrule: string, from = new Date()): Date | null {
   const FREQ = parts['FREQ'] || 'DAILY';
   const BYHOUR = parts['BYHOUR'] ? parseInt(parts['BYHOUR'], 10) : 9;
   const BYMINUTE = parts['BYMINUTE'] ? parseInt(parts['BYMINUTE'], 10) : 0;
-  const BYDAY = parts['BYDAY'] ? parts['BYDAY'].split(',') : null; // e.g. ['MO','TU']
-  const DTSTART = parts['DTSTART']; // ISO for FREQ=ONCE
+  const BYDAY = parts['BYDAY'] ? parts['BYDAY'].split(',') : null;
+  const DTSTART = parts['DTSTART'];
 
   const base = new Date(from);
   base.setSeconds(0, 0);
@@ -39,8 +34,7 @@ function computeNextRun(rrule: string, from = new Date()): Date | null {
     return x;
   };
 
-  // Map 0..6 => SU..SA (JS getDay: 0=Sun)
-  const dowCode = (d: number) => ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'][d];
+  const dowCode = (d: number) => ['SU','MO','TU','WE','TH','FR','SA'][d];
 
   if (FREQ === 'ONCE') {
     if (!DTSTART) return null;
@@ -49,7 +43,6 @@ function computeNextRun(rrule: string, from = new Date()): Date | null {
   }
 
   if (FREQ === 'DAILY') {
-    // today at H:M, else tomorrow
     const candidate = setTime(from);
     if (candidate > from) return candidate;
     const tomorrow = new Date(from);
@@ -58,7 +51,7 @@ function computeNextRun(rrule: string, from = new Date()): Date | null {
   }
 
   if (FREQ === 'WEEKLY') {
-    const allowed = new Set(BYDAY || ['MO', 'TU', 'WE', 'TH', 'FR', 'SA', 'SU']);
+    const allowed = new Set(BYDAY || ['MO','TU','WE','TH','FR','SA','SU']);
     for (let i = 0; i < 8; i++) {
       const d = new Date(from);
       d.setDate(d.getDate() + i);
@@ -68,13 +61,11 @@ function computeNextRun(rrule: string, from = new Date()): Date | null {
         if (candidate > from) return candidate;
       }
     }
-    // If nothing in the next 7 days (!) default to next week same time
     const nextWeek = new Date(from);
     nextWeek.setDate(nextWeek.getDate() + 7);
     return setTime(nextWeek);
   }
 
-  // Fallback: treat as DAILY
   const fallback = setTime(from);
   if (fallback > from) return fallback;
   const next = new Date(from);
@@ -83,25 +74,12 @@ function computeNextRun(rrule: string, from = new Date()): Date | null {
 }
 
 export class AlarmsService {
-  /**
-   * List alarms for user.
-   */
   async list(userId: string) {
-    return prisma.alarm.findMany({
-      where: { userId },
-      orderBy: { createdAt: 'desc' },
-    });
+    return prisma.alarm.findMany({ where: { userId }, orderBy: { createdAt: 'desc' } });
   }
 
-  /**
-   * Create alarm. rrule required.
-   * Example rrule:
-   *   - FREQ=DAILY;BYHOUR=7;BYMINUTE=0
-   *   - FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;BYHOUR=6;BYMINUTE=30
-   *   - FREQ=ONCE;DTSTART=2025-10-01T08:00:00.000Z
-   */
-  async create(userId: string, data: { label: string; rrule: string; tone?: 'strict' | 'balanced' | 'light' }) {
-    if (!data?.label || !data?.rrule) throw new Error('label and rrule are required');
+  async create(userId: string, data: { label: string; rrule: string; tone?: 'strict'|'balanced'|'light' }) {
+    if (!data?.label || !data?.rrule) throw new Error('label and rrule required');
 
     const nextRun = computeNextRun(data.rrule);
     const alarm = await prisma.alarm.create({
@@ -109,27 +87,20 @@ export class AlarmsService {
         userId,
         label: data.label,
         rrule: data.rrule,
-        tone: (data.tone as any) || 'balanced',
+        tone: data.tone || 'balanced',
         enabled: true,
-        nextRun: nextRun ?? null,
+        nextRun,
       },
     });
 
     await prisma.event.create({
-      data: {
-        userId,
-        type: 'alarm_created',
-        payload: { alarmId: alarm.id, label: alarm.label, rrule: alarm.rrule },
-      },
+      data: { userId, type: 'alarm_created', payload: { alarmId: alarm.id, label: alarm.label } },
     });
 
     return alarm;
   }
 
-  /**
-   * Update alarm. Recomputes nextRun if rrule or enabled changes.
-   */
-  async update(id: string, userId: string, changes: Partial<{ label: string; rrule: string; enabled: boolean; tone: 'strict' | 'balanced' | 'light' }>) {
+  async update(id: string, userId: string, changes: Partial<{ label: string; rrule: string; enabled: boolean; tone: string }>) {
     const existing = await prisma.alarm.findFirst({ where: { id, userId } });
     if (!existing) throw new Error('Alarm not found');
 
@@ -137,84 +108,71 @@ export class AlarmsService {
     if (typeof changes.enabled === 'boolean') {
       nextRun = changes.enabled ? computeNextRun(changes.rrule ?? existing.rrule) : null;
     }
-    if (typeof changes.rrule === 'string') {
-      nextRun = computeNextRun(changes.rrule);
-    }
+    if (changes.rrule) nextRun = computeNextRun(changes.rrule);
 
     const updated = await prisma.alarm.update({
       where: { id },
       data: {
-        label: typeof changes.label === 'string' ? changes.label : existing.label,
-        rrule: typeof changes.rrule === 'string' ? changes.rrule : existing.rrule,
+        label: changes.label ?? existing.label,
+        rrule: changes.rrule ?? existing.rrule,
         tone: (changes.tone as any) ?? existing.tone,
-        enabled: typeof changes.enabled === 'boolean' ? changes.enabled : existing.enabled,
+        enabled: changes.enabled ?? existing.enabled,
         nextRun,
       },
     });
 
     await prisma.event.create({
-      data: {
-        userId,
-        type: 'alarm_updated',
-        payload: { alarmId: id, changes },
-      },
+      data: { userId, type: 'alarm_updated', payload: { alarmId: id, changes } },
     });
 
     return updated;
   }
 
-  /**
-   * Delete alarm.
-   */
   async delete(id: string, userId: string) {
     const existing = await prisma.alarm.findFirst({ where: { id, userId } });
     if (!existing) throw new Error('Alarm not found');
-
     await prisma.alarm.delete({ where: { id } });
-
     await prisma.event.create({
-      data: {
-        userId,
-        type: 'alarm_deleted',
-        payload: { alarmId: id, label: existing.label },
-      },
+      data: { userId, type: 'alarm_deleted', payload: { alarmId: id, label: existing.label } },
     });
-
     return { ok: true };
   }
 
-  /**
-   * Mark an alarm “fired” (e.g., webhook or manual trigger), then schedule next.
-   * Debounces by Redis to avoid double-fires within 60s.
-   */
   async markFired(id: string, userId: string) {
     const alarm = await prisma.alarm.findFirst({ where: { id, userId } });
     if (!alarm) throw new Error('Alarm not found');
     if (!alarm.enabled) return { ok: false, message: 'Alarm disabled' };
 
-    // debounce 60s
+    // prevent duplicate fires
     const dedupeKey = `alarm:fired:${id}`;
-    const seen = await redis.get(dedupeKey);
-    if (seen) return { ok: true, deduped: true };
-
+    if (await redis.get(dedupeKey)) return { ok: true, deduped: true };
     await redis.set(dedupeKey, '1', 'EX', 60);
 
+    // log firing
     await prisma.event.create({
-      data: {
-        userId,
-        type: 'alarm_fired',
-        payload: { alarmId: id, label: alarm.label, tone: alarm.tone, rrule: alarm.rrule },
-      },
+      data: { userId, type: 'alarm_fired', payload: { alarmId: id, label: alarm.label, tone: alarm.tone } },
     });
 
-    // compute next
+    // mentor speech (ElevenLabs voice)
+    const text = `${alarm.label}. Time to move. ${
+      alarm.tone === 'strict' ? 'No excuses — do it now.' :
+      alarm.tone === 'balanced' ? 'Stay steady, progress comes daily.' :
+      'Take this lightly, but stay consistent.'
+    }`;
+    const voiceUrl = await voiceService.speak(userId, text);
+
+    // push notification (Firebase)
+    await notificationsService.push(userId, {
+      title: 'Alarm',
+      body: text,
+      sound: 'default',
+    });
+
+    // reschedule
     const nextRun = computeNextRun(alarm.rrule, new Date());
-    await prisma.alarm.update({
-      where: { id },
-      data: { nextRun },
-    });
+    await prisma.alarm.update({ where: { id }, data: { nextRun } });
 
-    return { ok: true, nextRun };
+    return { ok: true, nextRun, voiceUrl };
   }
 }
 
