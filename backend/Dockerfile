@@ -3,19 +3,18 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# Copy package files
+# Copy package.json + lock first
 COPY package*.json ./
 COPY tsconfig.json ./
 COPY prisma ./prisma
 
-# Install deps
 RUN npm install
 
-# Copy source
+# Copy all source
 COPY . .
 
-# Build TypeScript
+# Build TS -> JS
 RUN npm run build
 
-# Run migrations automatically
+# Run Prisma migrations on startup
 CMD npx prisma migrate deploy && node dist/server.js
