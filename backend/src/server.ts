@@ -1,85 +1,60 @@
-import Fastify from "fastify";
-import cors from "@fastify/cors";
-import swagger from "@fastify/swagger";
-import swaggerUI from "@fastify/swagger-ui";
-import { PrismaClient } from "@prisma/client";
-import Redis from "ioredis";
-import { Queue } from "bullmq";
-import dotenv from "dotenv";
-import habitsRoutes from "./modules/habits/habits.controller";
-import alarmsRoutes from "./alarms/alarms.controller";
-import briefRoutes from "./brief/brief.controller";
-import voiceRoutes from "./voice/voice.controller";
+import Fastify from 'fastify';
+import cors from '@fastify/cors';
+import swagger from '@fastify/swagger';
+import swaggerUI from '@fastify/swagger-ui';
+import { PrismaClient } from '@prisma/client';
+import Redis from 'ioredis';
 
-// Load env
-dotenv.config();
+import { habitsRoutes } from './controllers/habits.controller';
+import { alarmsRoutes } from './controllers/alarms.controller';
+import { briefRoutes } from './controllers/brief.controller';
 
-const prisma = new PrismaClient();
-const redis = new Redis(process.env.REDIS_URL || "redis://localhost:6379");
+const server = Fastify({ logger: true });
 
-// Queues
-const notificationQueue = new Queue("notifications", { connection: redis });
-const voiceQueue = new Queue("voice", { connection: redis });
-const analyticsQueue = new Queue("analytics", { connection: redis });
+// === Core Services ===
+export const prisma = new PrismaClient();
+export const redis = new Redis(process.env.REDIS_URL!);
 
-const buildServer = async () => {
-  const fastify = Fastify({
-    logger: true,
-  });
+// === Plugins ===
+server.register(cors, { origin: true });
 
-  // CORS
-  await fastify.register(cors, { origin: true });
+server.register(swagger, {
+  openapi: {
+    openapi: '3.0.0',
+    info: { title: 'DrillSergeant API', version: '1.0.0' },
+    servers: [{ url: process.env.BASE_URL || 'http://localhost:8080' }]
+  }
+});
+server.register(swaggerUI, {
+  routePrefix: '/docs',
+  uiConfig: { docExpansion: 'full', deepLinking: false }
+});
 
-  // Swagger
-  await fastify.register(swagger, {
-    openapi: {
-      openapi: "3.0.0",
-      info: { title: "Habit OS API", version: "1.0.0" },
-      servers: [{ url: `http://localhost:${process.env.PORT || 8080}` }],
-      components: {
-        securitySchemes: {
-          bearerAuth: { type: "http", scheme: "bearer", bearerFormat: "JWT" },
-        },
-      },
-    },
-  });
-  await fastify.register(swaggerUI, {
-    routePrefix: "/docs",
-    uiConfig: { docExpansion: "full", deepLinking: false },
-  });
+// === Routes ===
+server.register(habitsRoutes, { prefix: '/api/v1/habits' });
+server.register(alarmsRoutes, { prefix: '/api/v1/alarms' });
+server.register(briefRoutes, { prefix: '/api/v1/brief' });
 
-  // Health check
-  fastify.get("/health", async () => ({ ok: true, ts: new Date().toISOString() }));
+// === Healthcheck ===
+server.get('/health', async () => ({ ok: true, ts: new Date().toISOString() }));
 
-  // Register routes
-  await fastify.register(habitsRoutes);
-  await fastify.register(alarmsRoutes);
-  await fastify.register(briefRoutes);
-  await fastify.register(voiceRoutes);
-
-  // Graceful shutdown
-  fastify.addHook("onClose", async () => {
-    await prisma.$disconnect();
-    await redis.quit();
-    await notificationQueue.close();
-    await voiceQueue.close();
-    await analyticsQueue.close();
-  });
-
-  return fastify;
-};
-
+// === Start ===
 const start = async () => {
-  const fastify = await buildServer();
   try {
-    const port = Number(process.env.PORT) || 8080;
-    await fastify.listen({ port, host: "0.0.0.0" });
-    console.log(`🚀 Habit OS API running at http://localhost:${port}`);
-    console.log(`📚 Swagger docs at http://localhost:${port}/docs`);
+    await prisma.$connect();
+    console.log('✅ Connected to Postgres');
+
+    await redis.ping();
+    console.log('✅ Connected to Redis');
+
+    await server.listen({ port: Number(process.env.PORT) || 8080, host: '0.0.0.0' });
+    console.log(`🚀 Server running on ${process.env.BASE_URL || 'http://localhost:8080'}`);
   } catch (err) {
-    fastify.log.error(err);
+    server.log.error(err);
     process.exit(1);
   }
 };
 
 start();
+
+export default server;
