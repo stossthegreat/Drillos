@@ -1,11 +1,13 @@
 [build]
 builder = "NIXPACKS"
 
-[phases.setup]
-nixPkgs = ["nodejs_20", "npm"]
+[deploy]
+# Command Railway runs to build your app
+build = "npm install && npm run build"
 
-[phases.build]
-cmds = ["npm install", "npm run build"]
+# Command Railway runs to start your app
+start = "npm start"
 
-[phases.start]
-cmd = "npm start"
+# Optional: healthcheck for deploy
+healthcheckPath = "/health"
+healthcheckTimeout = 300
