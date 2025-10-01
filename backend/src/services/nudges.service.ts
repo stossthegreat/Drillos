@@ -13,39 +13,48 @@ export class NudgesService {
   async generateNudges(userId: string) {
     const streaks = await this.streaksService.getStreakSummary(userId);
     const patterns = await this.eventsService.getPatterns(userId);
+    const eventSummary = await this.eventsService.summarizeForAI(userId);
 
     const context = `
-User ID: ${userId}
-Current streaks: ${JSON.stringify(streaks)}
-Behavior patterns: ${JSON.stringify(patterns)}
+User: ${userId}
+Current streak summary: ${JSON.stringify(streaks)}
+Recent patterns: ${JSON.stringify(patterns)}
+Event log:\n${eventSummary}
 `;
 
     const prompt = `
-Act as the user's mentor.
-Write 2 short nudges to push them back on track.
-Tone: strict, stoic, or balanced (depending on mentor).
-Make it personal to their patterns and streaks.
+You are this user's chosen mentor (Marcus Aurelius, Drill Sergeant, Confucius, Lincoln, Buddha).
+Write 2 short nudges (1–2 sentences each).
+- Be personal (based on streaks & patterns).
+- One nudge should push discipline.
+- One should warn against repeating recent mistakes.
+Return them as plain text, separated by "---".
 `;
 
     const ai = await openai.chat.completions.create({
       model: process.env.OPENAI_MODEL || "gpt-4o-mini",
-      max_tokens: 200,
+      max_tokens: 250,
       messages: [
         { role: "system", content: context },
         { role: "user", content: prompt },
       ],
     });
 
-    const text = ai.choices[0].message?.content ?? "Keep going.";
-    const voiceUrl = await this.voiceService.speak("marcus", text);
+    const raw = ai.choices[0].message?.content ?? "";
+    const parts = raw.split("---").map(p => p.trim()).filter(Boolean);
 
-    return [
-      {
+    // Generate voice for each nudge
+    const nudges = [];
+    for (const text of parts) {
+      const audioUrl = await this.voiceService.speak("marcus", text); // TODO: use user.mentorId
+      nudges.push({
         type: "mentor_nudge",
         message: text,
-        audio: voiceUrl,
+        audio: audioUrl,
         priority: "high",
-      },
-    ];
+      });
+    }
+
+    return nudges;
   }
 }
