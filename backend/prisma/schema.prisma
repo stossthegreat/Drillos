@@ -27,6 +27,14 @@ model User {
   consentRoast Boolean   @default(false)
   safeWord     String?
   plan         Plan      @default(FREE)
+
+  // NEW: OS-specific fields
+  mentorId        String?   // e.g. "marcus" | "drill" | "confucius" | "lincoln" | "buddha"
+  fcmToken        String?   // Firebase Cloud Messaging token for push
+  nudgesEnabled   Boolean   @default(true)
+  briefsEnabled   Boolean   @default(true)
+  debriefsEnabled Boolean   @default(true)
+
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
