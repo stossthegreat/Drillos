@@ -126,6 +126,7 @@ const buildServer = () => {
   // health + startup-check
   fastify.get('/health', async (request, reply) => {
     try {
+      // Simple health check - no external calls
       return { 
         ok: true, 
         status: 'healthy',
@@ -177,13 +178,18 @@ const start = async () => {
     console.log('📖 Docs available at /docs');
     console.log('🩺 Health check available at /health');
     console.log('🔍 Startup check available at /startup-check');
-
-    // 🚀 Boot schedulers AFTER server is ready
-    console.log('⏰ Starting schedulers...');
-    await bootstrapSchedulers();
-    console.log('⏰ OS schedulers started: alarms + daily briefs');
-    
     console.log('✅ Server startup complete!');
+    
+    // 🚀 Boot schedulers AFTER server is ready (async, don't wait)
+    setImmediate(() => {
+      console.log('⏰ Starting schedulers...');
+      bootstrapSchedulers().then(() => {
+        console.log('⏰ OS schedulers started: alarms + daily briefs');
+      }).catch((err) => {
+        console.error('⚠️ Scheduler startup failed:', err);
+      });
+    });
+    
   } catch (err) {
     console.error('❌ Server startup failed:', err);
     process.exit(1);
