@@ -69,18 +69,18 @@ async function runStartupChecks() {
   const results: Record<string, any> = {};
 
   try {
-    await prisma.$queryRaw`SELECT 1`; 
+    await prisma.$queryRaw`SELECT 1`;
     results.postgres = 'ok';
   } catch (e: any) { results.postgres = `error: ${e.message}`; }
 
   try {
-    await redis.ping(); 
+    await redis.ping();
     results.redis = 'ok';
   } catch (e: any) { results.redis = `error: ${e.message}`; }
 
   try {
     const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-    await client.models.list(); 
+    await client.models.list();
     results.openai = 'ok';
   } catch (e: any) { results.openai = `error: ${e.message}`; }
 
@@ -137,7 +137,7 @@ const buildServer = () => {
   });
   fastify.register(swaggerUI, { routePrefix: '/docs', uiConfig: { docExpansion: 'full', deepLinking: false } });
 
-  // health + startup-check
+  // health check
   fastify.get('/health', async () => ({
     ok: true,
     status: 'healthy',
@@ -145,6 +145,15 @@ const buildServer = () => {
     uptime: process.uptime(),
   }));
 
+  // root route (fallback for Railway health check)
+  fastify.get('/', async () => ({
+    ok: true,
+    status: 'alive',
+    message: 'HabitOS API root',
+    timestamp: new Date().toISOString(),
+  }));
+
+  // startup-check
   fastify.get('/startup-check', async () => {
     const checks = await runStartupChecks();
     return { ok: Object.values(checks).every((v) => v === 'ok'), checks };
@@ -177,7 +186,7 @@ const start = async () => {
 
     console.log(`🚀 HabitOS API running at ${process.env.BACKEND_PUBLIC_URL || `http://localhost:${port}`}`);
     console.log('📖 Docs available at /docs');
-    console.log('🩺 Health check available at /health');
+    console.log('🩺 Health check available at /health and /');
     console.log('🔍 Startup check available at /startup-check');
 
     setImmediate(async () => {
