@@ -17,20 +17,37 @@ const openai = new OpenAI({
 type GenerateOptions = {
   purpose?: 'brief' | 'nudge' | 'debrief' | 'coach' | 'alarm';
   temperature?: number;
-  // optional: constrain length for push vs. chat
-  maxChars?: number;
+  maxChars?: number; // shorten output if for push notifications
 };
 
 export class AIService {
   /**
    * Persona-aware, memory-aware mentor reply.
-   * No mock: calls OpenAI with real context & saves event.
+   * Bypasses paywall in DEV/TEST mode.
    */
   async generateMentorReply(userId: string, mentorId: MentorId, userMessage: string, opts: GenerateOptions = {}) {
     const mentor = MENTORS[mentorId];
     if (!mentor) throw new Error('Invalid mentor');
 
-    // Pull compact profile + recent context
+    // 🟢 BYPASS paywall/quota for dev/test
+    if (process.env.NODE_ENV !== 'production' || process.env.ALLOW_FREE_AI === 'true') {
+      console.log('⚠️ Bypass AI paywall: free AI access in dev/test mode');
+    } else {
+      // In prod, check quota (only PRO users can use AI)
+      const user = await prisma.user.findUnique({ where: { id: userId } });
+      if (user?.plan !== 'PRO') {
+        throw new Error('AI access requires PRO subscription');
+      }
+      const today = new Date().toISOString().split('T')[0];
+      const quotaKey = `quota:ai:${userId}:${today}`;
+      const used = parseInt((await redis.get(quotaKey)) || '0', 10);
+      const cap = Number(process.env.LLM_DAILY_MSG_CAP_PRO || 150);
+      if (used >= cap) throw new Error('AI daily quota exceeded');
+      await redis.incr(quotaKey);
+      await redis.expire(quotaKey, 60 * 60 * 24);
+    }
+
+    // Pull context for memory + habits
     const [profile, ctx] = await Promise.all([
       memoryService.getProfileForMentor(userId),
       memoryService.getUserContext(userId),
@@ -64,7 +81,7 @@ export class AIService {
       text = text.slice(0, opts.maxChars - 1) + '…';
     }
 
-    // Save AI interaction
+    // Save AI interaction as event
     await prisma.event.create({
       data: {
         userId,
@@ -80,66 +97,44 @@ export class AIService {
     return text;
   }
 
-  /**
-   * Task-specific generator helpers used by OS loop (morning brief / evening debrief / nudges)
-   */
   async generateMorningBrief(userId: string, mentorId: MentorId) {
-    const msg = await this.generateMentorReply(
+    return this.generateMentorReply(
       userId,
       mentorId,
-      'Generate the morning brief: set the tone, list today’s 3 most important orders based on my habits and patterns. End with a single actionable order.',
+      'Generate my morning brief: set the tone, list my top 3 orders for today, end with one imperative.',
       { purpose: 'brief', temperature: 0.4, maxChars: 500 }
     );
-    return msg;
   }
 
   async generateEveningDebrief(userId: string, mentorId: MentorId) {
-    // First, update memory with day summary
     await memoryService.summarizeDay(userId);
-
-    const msg = await this.generateMentorReply(
+    return this.generateMentorReply(
       userId,
       mentorId,
-      'Generate my evening debrief: reflect briefly on what I did well/poorly, connect to streaks, and set one precise order for tomorrow morning.',
+      'Generate my evening debrief: reflect on successes/failures, streaks, and end with 1 order for tomorrow.',
       { purpose: 'debrief', temperature: 0.3, maxChars: 500 }
     );
-    return msg;
   }
 
   async generateNudge(userId: string, mentorId: MentorId, reason: string) {
-    const prompt = `Generate a short nudge due to: ${reason}. It must be sharp, 1-2 sentences max, ending with an imperative.`;
+    const prompt = `Generate a sharp nudge because: ${reason}. Keep it 1–2 sentences, end with a direct order.`;
     return this.generateMentorReply(userId, mentorId, prompt, { purpose: 'nudge', temperature: 0.5, maxChars: 220 });
   }
 
-  /**
-   * Small helper: persona-specific guardrails for different purposes.
-   */
   private buildGuidelines(mentorId: MentorId, purpose: NonNullable<GenerateOptions['purpose']>, profile: any) {
     const base = [
-      `You are ${MENTORS[mentorId].displayName}. Write in that voice.`,
-      `Match the user's plan/tone/intensity: plan=${profile.plan}, tone=${profile.tone}, intensity=${profile.intensity}`,
-      `Never write profanity or abuse. Be firm, not cruel.`,
-      `Be concise. Prefer action over theory.`,
+      `You are ${MENTORS[mentorId].displayName}. Write in their exact voice.`,
+      `Match user profile: plan=${profile.plan}, tone=${profile.tone}, intensity=${profile.intensity}`,
+      `No profanity. Firm but not cruel.`,
+      `Be concise. Action > theory.`,
     ];
 
     const byPurpose: Record<string, string[]> = {
-      brief: [
-        `Morning brief: energize, set 2-3 concrete orders based on habit data.`,
-        `No fluff. One punchy closer line with an imperative.`,
-      ],
-      debrief: [
-        `Evening debrief: 2-4 tight lines. Reflect truthfully. Praise/critique.`,
-        `One concrete order for tomorrow.`,
-      ],
-      nudge: [
-        `Nudge: 1-2 sentences only. Urgent, targeted, personalized.`,
-      ],
-      alarm: [
-        `Alarm: short call to action aligned with time-of-day ritual.`,
-      ],
-      coach: [
-        `Direct coaching: address weaknesses seen in context, give one clear next step.`,
-      ],
+      brief: [`Morning brief: 2–3 orders, 1 punchy closing line.`],
+      debrief: [`Evening debrief: 2–4 lines, mix praise/critique, 1 order for tomorrow.`],
+      nudge: [`Nudge: urgent, 1–2 sentences max, actionable.`],
+      alarm: [`Alarm: short ritual command for time-of-day.`],
+      coach: [`Direct coaching: call out weakness, give 1 clear next step.`],
     };
 
     return [...base, ...byPurpose[purpose]].join('\n');
