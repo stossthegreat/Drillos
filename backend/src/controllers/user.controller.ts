@@ -1,31 +1,105 @@
+// src/controllers/user.controller.ts
 import { FastifyInstance } from "fastify";
-import { UserService } from "../services/user.service";
+import { prisma } from "../utils/db";
 
 export async function userController(fastify: FastifyInstance) {
-  const userService = new UserService();
+  // Helper to get userId from auth or header
+  const getUserId = (req: any) => req?.user?.id || req.headers["x-user-id"];
 
-  // GET current user profile
-  fastify.get("/api/v1/users/me", async (request: any, reply) => {
-    const userId = request.user?.id; // you’ll connect this to auth later
+  // GET /api/v1/users/me
+  fastify.get("/api/v1/users/me", async (req: any, reply) => {
+    const userId = getUserId(req);
     if (!userId) return reply.code(401).send({ error: "Unauthorized" });
-
-    const user = await userService.getUser(userId);
+    const user = await prisma.user.findUnique({ where: { id: String(userId) } });
+    if (!user) return reply.code(404).send({ error: "User not found" });
     return user;
   });
 
-  // PATCH update user profile
-  fastify.patch("/api/v1/users/me", async (request: any, reply) => {
-    const userId = request.user?.id;
+  // PATCH /api/v1/users/me
+  fastify.patch("/api/v1/users/me", async (req: any, reply) => {
+    const userId = getUserId(req);
     if (!userId) return reply.code(401).send({ error: "Unauthorized" });
 
-    const updates = request.body as { mentorId?: string; tone?: string; intensity?: number };
+    const allowedMentors = ["marcus", "drill", "confucius", "lincoln", "buddha"];
+    const body = req.body as {
+      tone?: "strict" | "balanced" | "light";
+      intensity?: number;
+      mentorId?: string;
+      fcmToken?: string;
+      plan?: "FREE" | "PRO";
+    };
 
-    // only allow valid mentors
-    if (updates.mentorId && !["marcus", "drill", "confucius", "lincoln", "buddha"].includes(updates.mentorId)) {
+    if (body.mentorId && !allowedMentors.includes(body.mentorId)) {
       return reply.code(400).send({ error: "Invalid mentorId" });
     }
 
-    const updatedUser = await userService.updateUser(userId, updates);
-    return updatedUser;
+    const updated = await prisma.user.update({
+      where: { id: String(userId) },
+      data: {
+        tone: body.tone as any,
+        intensity: typeof body.intensity === "number" ? body.intensity : undefined,
+        mentorId: body.mentorId,
+        fcmToken: body.fcmToken,
+        plan: body.plan as any, // keep admin-only on FE
+      },
+    });
+
+    return updated;
+  });
+
+  // GET /api/v1/users/me/preferences
+  fastify.get("/api/v1/users/me/preferences", async (req: any, reply) => {
+    const userId = getUserId(req);
+    if (!userId) return reply.code(401).send({ error: "Unauthorized" });
+    const u = await prisma.user.findUnique({
+      where: { id: String(userId) },
+      select: {
+        nudgesEnabled: true,
+        briefsEnabled: true,
+        debriefsEnabled: true,
+        plan: true,
+        mentorId: true,
+      },
+    });
+    if (!u) return reply.code(404).send({ error: "User not found" });
+    return u;
+  });
+
+  // PATCH /api/v1/users/me/preferences
+  fastify.patch("/api/v1/users/me/preferences", async (req: any, reply) => {
+    const userId = getUserId(req);
+    if (!userId) return reply.code(401).send({ error: "Unauthorized" });
+
+    const body = req.body as {
+      nudgesEnabled?: boolean;
+      briefsEnabled?: boolean;
+      debriefsEnabled?: boolean;
+    };
+
+    const updated = await prisma.user.update({
+      where: { id: String(userId) },
+      data: {
+        nudgesEnabled: typeof body.nudgesEnabled === "boolean" ? body.nudgesEnabled : undefined,
+        briefsEnabled: typeof body.briefsEnabled === "boolean" ? body.briefsEnabled : undefined,
+        debriefsEnabled: typeof body.debriefsEnabled === "boolean" ? body.debriefsEnabled : undefined,
+      },
+    });
+
+    return updated;
+  });
+
+  // POST /api/v1/users/me/fcm-token
+  fastify.post("/api/v1/users/me/fcm-token", async (req: any, reply) => {
+    const userId = getUserId(req);
+    if (!userId) return reply.code(401).send({ error: "Unauthorized" });
+    const { token } = req.body as { token: string };
+    if (!token) return reply.code(400).send({ error: "token required" });
+
+    await prisma.user.update({
+      where: { id: String(userId) },
+      data: { fcmToken: token },
+    });
+
+    return { ok: true };
   });
 }
