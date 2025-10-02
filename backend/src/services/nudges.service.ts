@@ -67,7 +67,8 @@ Tone: ${mentor.style}, no fluff, straight orders.
     for (const text of parts) {
       let audioUrl: string | null = null;
       try {
-        audioUrl = await this.voiceService.speak(mentorId, text);
+        const voiceResult = await this.voiceService.speak(userId, text, mentorId);
+        audioUrl = voiceResult.url;
       } catch {
         audioUrl = null;
       }

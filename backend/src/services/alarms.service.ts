@@ -159,14 +159,12 @@ export class AlarmsService {
       alarm.tone === 'balanced' ? 'Stay steady, progress comes daily.' :
       'Take this lightly, but stay consistent.'
     }`;
-    const voiceUrl = await voiceService.speak(userId, text);
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    const voiceResult = await voiceService.speak(userId, text, user?.mentorId ?? 'marcus');
+    const voiceUrl = voiceResult.url;
 
     // push notification (Firebase)
-    await notificationsService.push(userId, {
-      title: 'Alarm',
-      body: text,
-      sound: 'default',
-    });
+    await notificationsService.send(userId, 'Alarm', text);
 
     // reschedule
     const nextRun = computeNextRun(alarm.rrule, new Date());

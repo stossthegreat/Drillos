@@ -2,7 +2,7 @@
 builder = "NIXPACKS"
 
 [deploy]
-build = "npm install && npm run build"
+build = "npm install && npm run prisma:generate && npm run build"
 start = "npm start"
 healthcheckPath = "/health"
 healthcheckTimeout = 300

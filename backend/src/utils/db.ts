@@ -3,7 +3,7 @@ import { PrismaClient } from '@prisma/client';
 import { isDev } from './env';
 import { logger } from './logger';
 
-let prisma: PrismaClient | null = null;
+let _prisma: PrismaClient | null = null;
 
 function makeClient() {
   const client = new PrismaClient({
@@ -18,20 +18,21 @@ function makeClient() {
 }
 
 export function getPrisma(): PrismaClient {
-  if (!prisma) {
+  if (!_prisma) {
     // reuse in dev hot-reload
     const g = global as any;
     if (isDev && g.__prisma__) {
-      prisma = g.__prisma__ as PrismaClient;
+      _prisma = g.__prisma__ as PrismaClient;
     } else {
-      prisma = makeClient();
-      if (isDev) (global as any).__prisma__ = prisma;
+      _prisma = makeClient();
+      if (isDev) (global as any).__prisma__ = _prisma;
     }
   }
-  return prisma!;
+  return _prisma!;
 }
 
 export const prismaClient = getPrisma();
+export const prisma = prismaClient; // Export as 'prisma' for compatibility
 
 export async function dbHealthCheck(): Promise<boolean> {
   try {
@@ -44,8 +45,8 @@ export async function dbHealthCheck(): Promise<boolean> {
 }
 
 export async function closeDb(): Promise<void> {
-  if (prisma) {
-    await prisma.$disconnect();
-    prisma = null;
+  if (_prisma) {
+    await _prisma.$disconnect();
+    _prisma = null;
   }
 }

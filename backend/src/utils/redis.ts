@@ -34,6 +34,8 @@ export function getRedis(): Redis {
   return client!;
 }
 
+export const redis = getRedis(); // Export as 'redis' for compatibility
+
 export async function redisHealthCheck(): Promise<boolean> {
   try {
     const c = getRedis();

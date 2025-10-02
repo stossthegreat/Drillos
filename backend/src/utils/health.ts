@@ -54,7 +54,7 @@ export async function checkDependencies() {
   }
 
   try {
-    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2022-11-15' });
+    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2025-08-27.basil' });
     await stripe.accounts.retrieve();
     results.stripe = 'ok';
   } catch (e: any) {

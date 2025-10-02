@@ -13,13 +13,13 @@ function getUserIdOrThrow(req: any): string {
 export default async function alarmsRoutes(fastify: FastifyInstance, _opts: FastifyPluginOptions) {
   // GET /v1/alarms
   fastify.get('/v1/alarms', {
-    schema: { tags: ['Alarms'], summary: 'List alarms', response: { 200: { type: 'array' } } },
+    schema: { tags: ['Alarms'], summary: 'List alarms', response: { 200: { type: 'array' }, 401: { type: 'object' } } },
   }, async (req, reply) => {
     try {
       const userId = getUserIdOrThrow(req);
       return await alarmsService.list(userId);
     } catch (e: any) {
-      reply.code(401).send({ error: e.message });
+      return reply.code(401).send({ error: e.message });
     }
   });
 

@@ -6,8 +6,8 @@ const HEADER = 'idempotency-key';
 const TTL_SECONDS = 60 * 10; // 10 min window
 
 async function takeLock(key: string) {
-  // SET key value NX EX ttl
-  const ok = await redis.set(key, '1', 'NX', 'EX', TTL_SECONDS);
+  // SET key value EX ttl NX
+  const ok = await redis.set(key, '1', 'EX', TTL_SECONDS, 'NX');
   return ok === 'OK';
 }
 

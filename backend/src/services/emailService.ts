@@ -1,4 +1,4 @@
-import { emailQueue, JOB_TYPES } from '../utils/queue';
+import { emailQueue, QUEUE_NAMES as JOB_TYPES } from '../utils/queue';
 
 export interface EmailJobData {
   to: string;
@@ -12,7 +12,7 @@ export interface EmailJobData {
 export class EmailService {
   async sendEmail(data: EmailJobData): Promise<void> {
     try {
-      await emailQueue.add(JOB_TYPES.SEND_EMAIL, {
+      await emailQueue.add(JOB_TYPES.EMAIL, {
         ...data,
         from: data.from || process.env.FROM_EMAIL || 'noreply@drillos.com',
         replyTo: data.replyTo || process.env.REPLY_TO_EMAIL,

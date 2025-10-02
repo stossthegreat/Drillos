@@ -13,12 +13,12 @@ import admin from 'firebase-admin';
 
 // controllers
 import { habitsController } from './controllers/habits.controller';
-import { alarmsController } from './controllers/alarms.controller';
+import alarmsController from './controllers/alarms.controller';
 import { streaksController } from './controllers/streaks.controller';
 import { eventsController } from './controllers/events.controller';
 import { nudgesController } from './controllers/nudges.controller';
-import { briefController } from './controllers/brief.controller';
-import { voiceController } from './controllers/voice.controller';
+import briefController from './controllers/brief.controller';
+// import { voiceController } from './controllers/voice.controller'; // Temporarily disabled
 import { userController } from './controllers/user.controller';
 
 // schedulers
@@ -95,7 +95,7 @@ async function runStartupChecks() {
   } catch (e: any) { results.firebase = `error: ${e.message}`; }
 
   try {
-    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2022-11-15' });
+    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2025-08-27.basil' });
     await stripe.accounts.retrieve();
     results.stripe = 'ok';
   } catch (e: any) { results.stripe = `error: ${e.message}`; }
@@ -131,7 +131,7 @@ const buildServer = () => {
   fastify.register(eventsController);
   fastify.register(nudgesController);
   fastify.register(briefController);
-  fastify.register(voiceController);
+  // fastify.register(voiceController); // Temporarily disabled due to method signature mismatch
   fastify.register(userController);
 
   return fastify;

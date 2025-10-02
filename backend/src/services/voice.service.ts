@@ -110,6 +110,14 @@ export class VoiceService {
     return { url: publicUrl, cached: false };
   }
 
+  /**
+   * Alias for speak() that returns just the URL string (backward compatibility)
+   */
+  async ttsToUrl(userId: string, text: string, voiceKey: string): Promise<string> {
+    const result = await this.speak(userId, text, voiceKey);
+    return result.url;
+  }
+
   private hash(s: string) {
     return crypto.createHash("sha256").update(s).digest("hex").slice(0, 40);
   }

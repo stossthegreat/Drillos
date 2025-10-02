@@ -11,6 +11,9 @@ export const QUEUE_NAMES = {
   HABIT_LOOP: 'habit-loop',
 } as const;
 
+// Alias for backward compatibility
+export const JOB_TYPES = QUEUE_NAMES;
+
 const connection = getRedis();
 
 const defaultOpts = (removeOnComplete = 100, removeOnFail = 50): QueueOptions & { defaultJobOptions: JobsOptions } => ({

@@ -39,7 +39,8 @@ Focus on today's pending habits and streak risks.
     });
 
     const text = ai.choices[0].message?.content ?? "Begin your mission today.";
-    const voiceUrl = await voiceService.speak(user?.mentorId ?? "marcus", text);
+    const voiceResult = await voiceService.speak(userId, text, user?.mentorId ?? "marcus");
+    const voiceUrl = voiceResult.url;
 
     return {
       mentor: user?.mentorId,
@@ -69,7 +70,8 @@ Be encouraging but hold them accountable.
     });
 
     const text = ai.choices[0].message?.content ?? "Reflect and prepare for tomorrow.";
-    const voiceUrl = await voiceService.speak(user?.mentorId ?? "drill", text);
+    const voiceResult = await voiceService.speak(userId, text, user?.mentorId ?? "drill");
+    const voiceUrl = voiceResult.url;
 
     return {
       mentor: user?.mentorId,
@@ -79,3 +81,5 @@ Be encouraging but hold them accountable.
     };
   }
 }
+
+export const briefService = new BriefService();
