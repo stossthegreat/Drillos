@@ -29,6 +29,12 @@ dotenv.config();
 
 // ✅ Validate env vars before boot
 function validateEnv() {
+  // Skip validation during build process
+  if (process.env.NODE_ENV === 'build' || process.env.RAILWAY_ENVIRONMENT === 'build') {
+    console.log('⏭️ Skipping env validation during build process');
+    return;
+  }
+
   const required = [
     'DATABASE_URL',
     'REDIS_URL',
