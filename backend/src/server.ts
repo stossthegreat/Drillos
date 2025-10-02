@@ -12,15 +12,15 @@ import Stripe from 'stripe';
 import admin from 'firebase-admin';
 
 // controllers
-import habitsController from './controllers/habits.controller';
+import { habitsController } from './controllers/habits.controller';
 import alarmsController from './controllers/alarms.controller';
-import streaksController from './controllers/streaks.controller';
-import eventsController from './controllers/events.controller';
-import nudgesController from './controllers/nudges.controller';
+import { streaksController } from './controllers/streaks.controller';
+import { eventsController } from './controllers/events.controller';
+import { nudgesController } from './controllers/nudges.controller';
 import briefController from './controllers/brief.controller';
-// ⚠️ voiceController commented out until the file exists
+// ⚠️ voiceController commented out until implemented
 // import voiceController from './controllers/voice.controller';
-import userController from './controllers/user.controller';
+import { userController } from './controllers/user.controller';
 
 // schedulers
 import { bootstrapSchedulers } from './jobs/scheduler';
@@ -30,7 +30,6 @@ dotenv.config();
 
 // ✅ Validate env vars before boot
 function validateEnv() {
-  // Skip validation during Railway build
   if (process.env.RAILWAY_BUILD === 'true') {
     console.log('⏭️ Skipping env validation during Railway build');
     return;
@@ -112,7 +111,6 @@ async function runStartupChecks() {
   } catch (e: any) { results.firebase = `error: ${e.message}`; }
 
   try {
-    // ⚠️ Removed hardcoded apiVersion that caused type errors
     const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
     await stripe.accounts.retrieve();
     results.stripe = 'ok';
@@ -129,7 +127,11 @@ const buildServer = () => {
   fastify.register(swagger, {
     openapi: {
       openapi: '3.0.0',
-      info: { title: 'HabitOS API', version: '1.0.0', description: 'The full-scale DrillSergeant / HabitOS API' },
+      info: {
+        title: 'HabitOS API',
+        version: '1.0.0',
+        description: 'The full-scale DrillSergeant / HabitOS API'
+      },
       servers: [{ url: process.env.BACKEND_PUBLIC_URL || 'http://localhost:8080' }],
     },
   });
@@ -178,7 +180,6 @@ const start = async () => {
     console.log('🩺 Health check available at /health');
     console.log('🔍 Startup check available at /startup-check');
 
-    // Boot schedulers AFTER server is ready
     setImmediate(async () => {
       try {
         console.log('⏰ Starting schedulers...');
