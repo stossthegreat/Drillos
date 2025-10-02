@@ -13,12 +13,12 @@ import admin from 'firebase-admin';
 
 // controllers
 import { habitsController } from './controllers/habits.controller';
-import alarmsController from './controllers/alarms.controller';
+import { alarmsController } from './controllers/alarms.controller';
 import { streaksController } from './controllers/streaks.controller';
 import { eventsController } from './controllers/events.controller';
 import { nudgesController } from './controllers/nudges.controller';
-import briefController from './controllers/brief.controller';
-// import { voiceController } from './controllers/voice.controller'; // Temporarily disabled
+import { briefController } from './controllers/brief.controller';
+import { voiceController } from './controllers/voice.controller';
 import { userController } from './controllers/user.controller';
 
 // schedulers
@@ -29,9 +29,9 @@ dotenv.config();
 
 // ✅ Validate env vars before boot
 function validateEnv() {
-  // Skip validation during build process
-  if (process.env.NODE_ENV === 'build' || process.env.RAILWAY_ENVIRONMENT === 'build') {
-    console.log('⏭️ Skipping env validation during build process');
+  // Skip validation during Railway build
+  if (process.env.RAILWAY_BUILD === 'true') {
+    console.log('⏭️ Skipping env validation during Railway build');
     return;
   }
 
@@ -67,24 +67,34 @@ function validateEnv() {
 // ✅ Startup integration checks
 async function runStartupChecks() {
   const results: Record<string, any> = {};
+
   try {
-    await prisma.$queryRaw`SELECT 1`; results.postgres = 'ok';
+    await prisma.$queryRaw`SELECT 1`; 
+    results.postgres = 'ok';
   } catch (e: any) { results.postgres = `error: ${e.message}`; }
 
   try {
-    await redis.ping(); results.redis = 'ok';
+    await redis.ping(); 
+    results.redis = 'ok';
   } catch (e: any) { results.redis = `error: ${e.message}`; }
 
   try {
     const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-    await client.models.list(); results.openai = 'ok';
+    await client.models.list(); 
+    results.openai = 'ok';
   } catch (e: any) { results.openai = `error: ${e.message}`; }
 
   try {
     const res = await fetch('https://api.elevenlabs.io/v1/voices', {
       headers: { 'xi-api-key': process.env.ELEVENLABS_API_KEY! },
     });
-    results.elevenlabs = res.ok ? 'ok' : 'error';
+    if (res.ok) {
+      results.elevenlabs = 'ok';
+    } else {
+      const txt = await res.text();
+      console.error('❌ ElevenLabs failed:', txt);
+      results.elevenlabs = `error: ${txt}`;
+    }
   } catch (e: any) { results.elevenlabs = `error: ${e.message}`; }
 
   try {
@@ -101,7 +111,7 @@ async function runStartupChecks() {
   } catch (e: any) { results.firebase = `error: ${e.message}`; }
 
   try {
-    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2025-08-27.basil' });
+    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2022-11-15' });
     await stripe.accounts.retrieve();
     results.stripe = 'ok';
   } catch (e: any) { results.stripe = `error: ${e.message}`; }
@@ -124,21 +134,13 @@ const buildServer = () => {
   fastify.register(swaggerUI, { routePrefix: '/docs', uiConfig: { docExpansion: 'full', deepLinking: false } });
 
   // health + startup-check
-  fastify.get('/health', async (request, reply) => {
-    try {
-      // Simple health check - no external calls
-      return { 
-        ok: true, 
-        status: 'healthy',
-        timestamp: new Date().toISOString(),
-        uptime: process.uptime()
-      };
-    } catch (error) {
-      reply.code(500);
-      return { ok: false, error: 'Health check failed' };
-    }
-  });
-  
+  fastify.get('/health', async () => ({
+    ok: true,
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+  }));
+
   fastify.get('/startup-check', async () => {
     const checks = await runStartupChecks();
     return { ok: Object.values(checks).every((v) => v === 'ok'), checks };
@@ -151,7 +153,7 @@ const buildServer = () => {
   fastify.register(eventsController);
   fastify.register(nudgesController);
   fastify.register(briefController);
-  // fastify.register(voiceController); // Temporarily disabled due to method signature mismatch
+  fastify.register(voiceController);
   fastify.register(userController);
 
   return fastify;
@@ -161,35 +163,29 @@ const buildServer = () => {
 const start = async () => {
   try {
     console.log('🚀 Starting HabitOS API...');
-    
-    // Validate environment (skip during build)
     validateEnv();
-    
-    console.log('🔧 Building server...');
+
     const server = buildServer();
-    
     const port = process.env.PORT ? Number(process.env.PORT) : 8080;
     const host = process.env.HOST || '0.0.0.0';
-    
-    console.log(`🌐 Listening on ${host}:${port}...`);
+
     await server.listen({ port, host });
-    
+
     console.log(`🚀 HabitOS API running at ${process.env.BACKEND_PUBLIC_URL || `http://localhost:${port}`}`);
     console.log('📖 Docs available at /docs');
     console.log('🩺 Health check available at /health');
     console.log('🔍 Startup check available at /startup-check');
-    console.log('✅ Server startup complete!');
-    
-    // 🚀 Boot schedulers AFTER server is ready (async, don't wait)
-    setImmediate(() => {
-      console.log('⏰ Starting schedulers...');
-      bootstrapSchedulers().then(() => {
+
+    // Boot schedulers AFTER server is ready
+    setImmediate(async () => {
+      try {
+        console.log('⏰ Starting schedulers...');
+        await bootstrapSchedulers();
         console.log('⏰ OS schedulers started: alarms + daily briefs');
-      }).catch((err) => {
+      } catch (err) {
         console.error('⚠️ Scheduler startup failed:', err);
-      });
+      }
     });
-    
   } catch (err) {
     console.error('❌ Server startup failed:', err);
     process.exit(1);
