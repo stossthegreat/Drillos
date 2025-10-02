@@ -1,6 +1,4 @@
-import { PrismaClient } from "@prisma/client";
-
-const prisma = new PrismaClient();
+import { prisma } from "../utils/db";
 
 export class EventsService {
   async logEvent(userId: string, type: string, payload: Record<string, any>) {
