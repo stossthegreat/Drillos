@@ -124,7 +124,20 @@ const buildServer = () => {
   fastify.register(swaggerUI, { routePrefix: '/docs', uiConfig: { docExpansion: 'full', deepLinking: false } });
 
   // health + startup-check
-  fastify.get('/health', async () => ({ ok: true, ts: new Date().toISOString() }));
+  fastify.get('/health', async (request, reply) => {
+    try {
+      return { 
+        ok: true, 
+        status: 'healthy',
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime()
+      };
+    } catch (error) {
+      reply.code(500);
+      return { ok: false, error: 'Health check failed' };
+    }
+  });
+  
   fastify.get('/startup-check', async () => {
     const checks = await runStartupChecks();
     return { ok: Object.values(checks).every((v) => v === 'ok'), checks };
@@ -145,20 +158,34 @@ const buildServer = () => {
 
 // ✅ Start server
 const start = async () => {
-  validateEnv();
-  const server = buildServer();
   try {
+    console.log('🚀 Starting HabitOS API...');
+    
+    // Validate environment (skip during build)
+    validateEnv();
+    
+    console.log('🔧 Building server...');
+    const server = buildServer();
+    
     const port = process.env.PORT ? Number(process.env.PORT) : 8080;
-    await server.listen({ port, host: process.env.HOST || '0.0.0.0' });
+    const host = process.env.HOST || '0.0.0.0';
+    
+    console.log(`🌐 Listening on ${host}:${port}...`);
+    await server.listen({ port, host });
+    
     console.log(`🚀 HabitOS API running at ${process.env.BACKEND_PUBLIC_URL || `http://localhost:${port}`}`);
     console.log('📖 Docs available at /docs');
-    console.log('🩺 Run /startup-check to verify integrations');
+    console.log('🩺 Health check available at /health');
+    console.log('🔍 Startup check available at /startup-check');
 
     // 🚀 Boot schedulers AFTER server is ready
+    console.log('⏰ Starting schedulers...');
     await bootstrapSchedulers();
     console.log('⏰ OS schedulers started: alarms + daily briefs');
+    
+    console.log('✅ Server startup complete!');
   } catch (err) {
-    server.log.error(err);
+    console.error('❌ Server startup failed:', err);
     process.exit(1);
   }
 };
