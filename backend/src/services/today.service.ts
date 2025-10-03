@@ -1,10 +1,3 @@
-import { prisma } from "../utils/db";
-import { HabitsService } from "./habits.service";
-import { TasksService } from "./tasks.service";
-
-const habitsService = new HabitsService();
-const tasksService = new TasksService();
-
 export class TodayService {
   async getTodayItems(userId: string, dateString?: string) {
     const date = dateString ? dateString : new Date().toISOString().split('T')[0];
@@ -75,34 +68,4 @@ export class TodayService {
   }
 
   async deselectForToday(userId: string, habitId?: string, taskId?: string, dateString?: string) {
-    if (!habitId && !taskId) {
-      throw new Error("Either habitId or taskId must be provided");
-    }
-    const date = dateString ? dateString : new Date().toISOString().split('T')[0];
-
-    const deleted = await prisma.todaySelection.deleteMany({
-      where: { userId, date, OR: [{ habitId }, { taskId }] },
-    });
-    return { count: deleted.count };
-  }
-
-  async completeTodayItem(userId: string, selectionId: string) {
-    const selection = await prisma.todaySelection.findUnique({ where: { id: selectionId, userId } });
-    if (!selection) {
-      throw new Error("Today selection not found");
-    }
-
-    if (selection.habitId) {
-      await habitsService.tick({ habitId: selection.habitId, userId });
-    } else if (selection.taskId) {
-      await tasksService.complete(selection.taskId, userId);
-    }
-
-    return prisma.todaySelection.update({
-      where: { id: selectionId },
-      data: { completed: true },
-    });
-  }
-}
-
 export const todayService = new TodayService();
