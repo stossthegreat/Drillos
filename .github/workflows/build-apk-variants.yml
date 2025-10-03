@@ -27,10 +27,13 @@ jobs:
     - name: Setup Flutter
       uses: subosito/flutter-action@v2
       with:
-        flutter-version: '3.24.0'
+        flutter-version: '3.27.1'
         channel: 'stable'
         cache: true
         
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v3
+      
     - name: Get Flutter dependencies
       run: flutter pub get
       
