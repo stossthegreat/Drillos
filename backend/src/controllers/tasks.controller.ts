@@ -1,5 +1,6 @@
 import { FastifyInstance } from "fastify";
 import { tasksService } from "../services/tasks.service";
+import { prisma } from "../utils/db";
 
 function getUserIdOrThrow(req: any): string {
   const uid = req?.user?.id || req.headers["x-user-id"];
@@ -11,6 +12,31 @@ function getUserIdOrThrow(req: any): string {
 
 export async function tasksController(fastify: FastifyInstance) {
   const service = tasksService;
+
+  // Helper to ensure demo user exists
+  async function ensureDemoUser(userId: string) {
+    if (userId === "demo-user-123") {
+      const existingUser = await prisma.user.findUnique({ where: { id: userId } });
+      if (!existingUser) {
+        await prisma.user.create({
+          data: {
+            id: userId,
+            email: "demo@drillsergeant.com",
+            tz: "Europe/London",
+            tone: "balanced",
+            intensity: 2,
+            consentRoast: false,
+            plan: "FREE",
+            mentorId: "marcus",
+            nudgesEnabled: true,
+            briefsEnabled: true,
+            debriefsEnabled: true,
+          },
+        });
+        console.log("✅ Created demo user:", userId);
+      }
+    }
+  }
 
   // GET /api/v1/tasks
   fastify.get("/api/v1/tasks", {
@@ -76,6 +102,7 @@ export async function tasksController(fastify: FastifyInstance) {
   }, async (req: any, reply) => {
     try {
       const userId = getUserIdOrThrow(req);
+      await ensureDemoUser(userId);
       const task = await service.create(userId, req.body);
       reply.code(201);
       return task;

@@ -1,20 +1,47 @@
 import { FastifyInstance } from "fastify";
 import { HabitsService } from "../services/habits.service";
+import { prisma } from "../utils/db";
 
 export async function habitsController(fastify: FastifyInstance) {
   const service = new HabitsService();
 
-  // List habits (with “completed today” status)
+  // Helper to ensure demo user exists
+  async function ensureDemoUser(userId: string) {
+    if (userId === "demo-user-123") {
+      const existingUser = await prisma.user.findUnique({ where: { id: userId } });
+      if (!existingUser) {
+        await prisma.user.create({
+          data: {
+            id: userId,
+            email: "demo@drillsergeant.com",
+            tz: "Europe/London",
+            tone: "balanced",
+            intensity: 2,
+            consentRoast: false,
+            plan: "FREE",
+            mentorId: "marcus",
+            nudgesEnabled: true,
+            briefsEnabled: true,
+            debriefsEnabled: true,
+          },
+        });
+        console.log("✅ Created demo user:", userId);
+      }
+    }
+  }
+
+  // List habits (with "completed today" status)
   fastify.get("/api/v1/habits", async (req, reply) => {
-    // TODO: replace with real auth userId
-    const userId = (req as any).user?.id || "demo-user-123";
+    const userId = (req as any).user?.id || req.headers['x-user-id'] || "demo-user-123";
+    await ensureDemoUser(userId);
     const habits = await service.list(userId);
     return habits;
   });
 
   // Create habit
   fastify.post("/api/v1/habits", async (req, reply) => {
-    const userId = (req as any).user?.id || "demo-user-123";
+    const userId = (req as any).user?.id || req.headers['x-user-id'] || "demo-user-123";
+    await ensureDemoUser(userId);
     const body = req.body as any;
 
     const habit = await service.create(userId, {
@@ -40,7 +67,7 @@ export async function habitsController(fastify: FastifyInstance) {
     Body: { date?: string };
     Headers: { "idempotency-key"?: string } & Record<string, string>;
   }>("/api/v1/habits/:id/tick", async (req, reply) => {
-    const userId = (req as any).user?.id || "demo-user-123";
+    const userId = (req as any).user?.id || req.headers['x-user-id'] || "demo-user-123";
     const id = req.params.id;
     const body = req.body || {};
     const dateStr = (body as any).date; // optional ISO YYYY-MM-DD
@@ -62,7 +89,7 @@ export async function habitsController(fastify: FastifyInstance) {
   fastify.delete<{
     Params: { id: string };
   }>("/api/v1/habits/:id", async (req, reply) => {
-    const userId = (req as any).user?.id || "demo-user-123";
+    const userId = (req as any).user?.id || req.headers['x-user-id'] || "demo-user-123";
     const id = req.params.id;
     const res = await service.delete(id, userId);
     return res;
