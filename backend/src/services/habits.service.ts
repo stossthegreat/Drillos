@@ -38,6 +38,11 @@ export class HabitsService {
     return prisma.habit.findFirst({
       where: { id: habitId, userId },
     });
+  async getById(id: string, userId: string) {
+    const habit = await prisma.habit.findFirst({
+      where: { id, userId },
+    });
+    return habit;
   }
 
   async create(userId: string, input: CreateHabitInput) {

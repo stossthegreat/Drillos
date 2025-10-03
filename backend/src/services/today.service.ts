@@ -21,6 +21,7 @@ export class TodayService {
     const items: any[] = [];
     for (const selection of selections) {
       if (selection.habitId) {
+        const habitsService = new HabitsService();
         const habit = await habitsService.getById(selection.habitId, userId);
         if (habit) {
           items.push({
