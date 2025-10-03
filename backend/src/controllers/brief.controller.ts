@@ -53,9 +53,33 @@ export default async function briefRoutes(fastify: FastifyInstance, _opts: Fasti
     try {
       const userId = getUserIdOrThrow(req);
       await ensureDemoUser(userId);
-      const result = await briefService.getTodaysBrief(userId);
-      console.log('✅ Brief service returned:', JSON.stringify(result).substring(0, 200));
-      return result;
+      
+      // DIRECT IMPLEMENTATION - bypass service for now
+      const { HabitsService } = await import('../services/habits.service');
+      const { tasksService } = await import('../services/tasks.service');
+      const habitsService = new HabitsService();
+      
+      const habits = await habitsService.list(userId);
+      const tasks = await tasksService.list(userId, false);
+      const todaySelections = await prisma.todaySelection.findMany({
+        where: { userId, date: new Date().toISOString().split('T')[0] },
+        include: { habit: true, task: true },
+      });
+      
+      const today = todaySelections.map(sel => {
+        if (sel.habit) return {
+          id: sel.habit.id, name: sel.habit.title, type: 'habit',
+          completed: sel.habit.lastTick ? new Date(sel.habit.lastTick).toDateString() === new Date().toDateString() : false,
+          streak: sel.habit.streak, color: (sel.habit as any).color ?? 'emerald',
+        };
+        if (sel.task) return {
+          id: sel.task.id, name: sel.task.title, type: 'task',
+          completed: sel.task.completed, priority: sel.task.priority,
+        };
+        return null;
+      }).filter(Boolean);
+      
+      return { mentor: 'marcus', message: 'Begin your mission today.', audio: null, missions: habits, habits, tasks, today };
     } catch (e: any) {
       console.error('❌ Brief error:', e);
       return reply.code(400).send({ error: e.message || String(e) });
