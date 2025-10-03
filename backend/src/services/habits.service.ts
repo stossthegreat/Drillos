@@ -53,6 +53,9 @@ export class HabitsService {
         context: input.context ?? {},
         reminderEnabled: input.reminderEnabled ?? false,
         reminderTime: input.reminderTime ?? null,
+        user: {
+          connect: { id: userId }
+        },
       },
     });
     await this.logEvent(userId, "habit_created", { habitId: habit.id, title: habit.title });
