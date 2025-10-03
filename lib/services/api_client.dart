@@ -71,7 +71,7 @@ class ApiClient {
   // ============ USERS ============
   Future<Map<String, dynamic>> getMe() async {
     final response = await http.get(
-      Uri.parse('$baseUrl/v1/users/me'),
+      Uri.parse('$baseUrl/api/v1/users/me'),
       headers: _headers,
     );
     
@@ -84,7 +84,7 @@ class ApiClient {
 
   Future<Map<String, dynamic>> updateMe(Map<String, dynamic> updates) async {
     final response = await http.patch(
-      Uri.parse('$baseUrl/v1/users/me'),
+      Uri.parse('$baseUrl/api/v1/users/me'),
       headers: _headers,
       body: json.encode(updates),
     );
@@ -99,7 +99,7 @@ class ApiClient {
   // ============ BRIEF ============
   Future<Map<String, dynamic>> getBriefToday() async {
     final response = await http.get(
-      Uri.parse('$baseUrl/v1/brief'),
+      Uri.parse('$baseUrl/v1/brief/today'),
       headers: _headers,
     );
     if (response.statusCode == 200) {
@@ -144,7 +144,7 @@ class ApiClient {
   // ============ HABITS ============
   Future<List<dynamic>> getHabits() async {
     final response = await http.get(
-      Uri.parse('$baseUrl/v1/habits'),
+      Uri.parse('$baseUrl/api/v1/habits'),
       headers: _headers,
     );
     
@@ -157,7 +157,7 @@ class ApiClient {
 
   Future<Map<String, dynamic>> createHabit(Map<String, dynamic> habitData) async {
     final response = await http.post(
-      Uri.parse('$baseUrl/v1/habits'),
+      Uri.parse('$baseUrl/api/v1/habits'),
       headers: _headers,
       body: json.encode(habitData),
     );
@@ -176,7 +176,7 @@ class ApiClient {
     }
 
     final response = await http.post(
-      Uri.parse('$baseUrl/v1/habits/$habitId/tick'),
+      Uri.parse('$baseUrl/api/v1/habits/$habitId/tick'),
       headers: headers,
       body: json.encode({}),
     );
@@ -243,7 +243,7 @@ class ApiClient {
   // ============ TASKS ============
   Future<List<dynamic>> getTasks() async {
     final response = await http.get(
-      Uri.parse('$baseUrl/v1/tasks'),
+      Uri.parse('$baseUrl/api/v1/tasks'),
       headers: _headers,
     );
     
@@ -256,7 +256,7 @@ class ApiClient {
 
   Future<Map<String, dynamic>> createTask(Map<String, dynamic> taskData) async {
     final response = await http.post(
-      Uri.parse('$baseUrl/v1/tasks'),
+      Uri.parse('$baseUrl/api/v1/tasks'),
       headers: _headers,
       body: json.encode(taskData),
     );
@@ -270,7 +270,7 @@ class ApiClient {
 
   Future<Map<String, dynamic>> completeTask(String taskId) async {
     final response = await http.post(
-      Uri.parse('$baseUrl/v1/tasks/$taskId/complete'),
+      Uri.parse('$baseUrl/api/v1/tasks/$taskId/complete'),
       headers: _headers,
       body: json.encode({}),
     );
@@ -285,7 +285,7 @@ class ApiClient {
   // ============ AI NUDGES ============
   Future<Map<String, dynamic>> getNudge() async {
     final response = await http.get(
-      Uri.parse('$baseUrl/v1/nudge'),
+      Uri.parse('$baseUrl/api/v1/nudges'),
       headers: _headers,
     );
     
@@ -437,7 +437,7 @@ class ApiClient {
   // ============ STREAKS ============
   Future<Map<String, dynamic>> getAchievements() async {
     final response = await http.get(
-      Uri.parse('$baseUrl/v1/streaks/achievements'),
+      Uri.parse('$baseUrl/api/v1/streaks/achievements'),
       headers: _headers,
     );
     
@@ -450,7 +450,7 @@ class ApiClient {
 
   Future<Map<String, dynamic>> getStreakSummary() async {
     final response = await http.get(
-      Uri.parse('$baseUrl/v1/streaks/summary'),
+      Uri.parse('$baseUrl/api/v1/streaks/summary'),
       headers: _headers,
     );
     
@@ -504,7 +504,7 @@ class ApiClient {
   // ============ HABIT & TASK DELETION ============
   Future<void> deleteHabit(String habitId) async {
     final response = await http.delete(
-      Uri.parse('$baseUrl/v1/habits/$habitId'),
+      Uri.parse('$baseUrl/api/v1/habits/$habitId'),
       headers: _headers,
     );
     
@@ -515,7 +515,7 @@ class ApiClient {
 
   Future<void> deleteTask(String taskId) async {
     final response = await http.delete(
-      Uri.parse('$baseUrl/v1/tasks/$taskId'),
+      Uri.parse('$baseUrl/api/v1/tasks/$taskId'),
       headers: _headers,
     );
     
