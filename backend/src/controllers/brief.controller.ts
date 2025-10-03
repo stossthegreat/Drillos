@@ -79,7 +79,15 @@ export default async function briefRoutes(fastify: FastifyInstance, _opts: Fasti
         return null;
       }).filter(Boolean);
       
-      return { mentor: 'marcus', message: 'Begin your mission today.', audio: null, missions: habits, habits, tasks, today };
+      return { 
+        mentor: 'marcus', 
+        message: 'Begin your mission today.', 
+        audio: null, 
+        missions: habits, 
+        habits, 
+        tasks, 
+        today 
+      };
     } catch (e: any) {
       console.error('❌ Brief error:', e);
       return reply.code(400).send({ error: e.message || String(e) });
