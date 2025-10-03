@@ -144,7 +144,7 @@ export default async function briefRoutes(fastify: FastifyInstance, _opts: Fasti
     }
   });
 
-  // TEST ENDPOINT - direct habits/tasks
+  // TEST ENDPOINT - direct habits/tasks with today selections
   fastify.get('/v1/brief/test', async (req, reply) => {
     try {
       const userId = getUserIdOrThrow(req);
@@ -154,15 +154,39 @@ export default async function briefRoutes(fastify: FastifyInstance, _opts: Fasti
       const { tasksService } = await import('../services/tasks.service');
       const habitsService = new HabitsService();
       
-             const habits = await habitsService.list(userId);
-             const tasks = await tasksService.list(userId, true); // Include completed tasks
+      const habits = await habitsService.list(userId);
+      const tasks = await tasksService.list(userId, true); // Include completed tasks
+
+      // Get today's selections
+      const todaySelections = await prisma.todaySelection.findMany({
+        where: { userId, date: new Date().toISOString().split('T')[0] },
+        include: { habit: true, task: true },
+      });
+
+      const today = todaySelections.map(sel => {
+        if (sel.habit) return {
+          id: sel.habit.id, name: sel.habit.title, type: 'habit',
+          completed: sel.habit.lastTick ? new Date(sel.habit.lastTick).toDateString() === new Date().toDateString() : false,
+          streak: sel.habit.streak, color: (sel.habit as any).color ?? 'emerald',
+        };
+        if (sel.task) return {
+          id: sel.task.id, name: sel.task.title, type: 'task',
+          completed: sel.task.completed, priority: sel.task.priority,
+        };
+        return null;
+      }).filter(Boolean);
       
       return { 
-        success: true, 
+        success: true,
+        mentor: 'marcus',
+        message: 'Begin your mission today.',
+        audio: null,
         habitsCount: habits.length, 
         tasksCount: tasks.length,
-        habits: habits.slice(0, 2),
-        tasks: tasks.slice(0, 2)
+        todayCount: today.length,
+        habits,
+        tasks,
+        today
       };
     } catch (e: any) {
       return { error: e.message, stack: e.stack };
