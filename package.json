@@ -4,7 +4,7 @@
   "description": "Drillos - Flutter frontend + Node.js backend",
   "private": true,
   "scripts": {
-    "build": "cd backend && npx prisma generate && CI=false tsc",
+    "build": "npm --prefix backend run build",
     "start": "cd backend && npx prisma db push && node dist/server.js",
     "install": "cd backend && npm ci --only=production"
   },
