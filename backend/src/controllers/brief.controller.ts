@@ -136,6 +136,31 @@ export default async function briefRoutes(fastify: FastifyInstance, _opts: Fasti
     }
   });
 
+  // TEST ENDPOINT - direct habits/tasks
+  fastify.get('/v1/brief/test', async (req, reply) => {
+    try {
+      const userId = getUserIdOrThrow(req);
+      await ensureDemoUser(userId);
+      
+      const { HabitsService } = await import('../services/habits.service');
+      const { tasksService } = await import('../services/tasks.service');
+      const habitsService = new HabitsService();
+      
+      const habits = await habitsService.list(userId);
+      const tasks = await tasksService.list(userId, false);
+      
+      return { 
+        success: true, 
+        habitsCount: habits.length, 
+        tasksCount: tasks.length,
+        habits: habits.slice(0, 2),
+        tasks: tasks.slice(0, 2)
+      };
+    } catch (e: any) {
+      return { error: e.message, stack: e.stack };
+    }
+  });
+
   // POST /v1/brief/today/deselect
   fastify.post('/v1/brief/today/deselect', {
     schema: {
