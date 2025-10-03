@@ -36,33 +36,32 @@ function validateEnv() {
     return;
   }
 
+  // Only DATABASE_URL and REDIS_URL are truly required
   const required = [
     'DATABASE_URL',
     'REDIS_URL',
-    'OPENAI_API_KEY',
-    'OPENAI_MODEL',
-    'ELEVENLABS_API_KEY',
-    'ELEVENLABS_VOICE_MARCUS',
-    'ELEVENLABS_VOICE_DRILL',
-    'ELEVENLABS_VOICE_CONFUCIUS',
-    'ELEVENLABS_VOICE_LINCOLN',
-    'ELEVENLABS_VOICE_BUDDHA',
-    'FIREBASE_PROJECT_ID',
-    'FIREBASE_CLIENT_EMAIL',
-    'FIREBASE_PRIVATE_KEY',
-    'STRIPE_SECRET_KEY',
-    'STRIPE_WEBHOOK_SECRET',
-    'S3_ENDPOINT',
-    'S3_BUCKET',
-    'S3_ACCESS_KEY',
-    'S3_SECRET_KEY',
   ];
+  
   const missing = required.filter((key) => !process.env[key]);
   if (missing.length > 0) {
-    console.error('❌ Missing required env vars:', missing.join(', '));
+    console.error('❌ Missing critical env vars:', missing.join(', '));
     process.exit(1);
   }
-  console.log('✅ Env vars validated.');
+  
+  // Warn about optional but useful env vars
+  const optional = [
+    'OPENAI_API_KEY',
+    'ELEVENLABS_API_KEY',
+    'FIREBASE_PROJECT_ID',
+    'STRIPE_SECRET_KEY',
+    'S3_ENDPOINT',
+  ];
+  const missingOptional = optional.filter((key) => !process.env[key]);
+  if (missingOptional.length > 0) {
+    console.warn('⚠️ Missing optional env vars (some features may not work):', missingOptional.join(', '));
+  }
+  
+  console.log('✅ Core env vars validated.');
 }
 
 // ✅ Startup integration checks

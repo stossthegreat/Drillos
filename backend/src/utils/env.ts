@@ -43,8 +43,14 @@ const EnvSchema = z.object({
   FIREBASE_PRIVATE_KEY: z.string().default(''), // keep literal \n in .env and we'll replace
 
   // Stripe (optional now; still validate presence if you plan billing)
-  STRIPE_SECRET_KEY: z.string().optional(),
-  STRIPE_WEBHOOK_SECRET: z.string().optional(),
+  STRIPE_SECRET_KEY: z.string().default(''),
+  STRIPE_WEBHOOK_SECRET: z.string().default(''),
+
+  // S3/MinIO (optional)
+  S3_ENDPOINT: z.string().default(''),
+  S3_BUCKET: z.string().default(''),
+  S3_ACCESS_KEY: z.string().default(''),
+  S3_SECRET_KEY: z.string().default(''),
 });
 
 const parsed = EnvSchema.safeParse(process.env);
