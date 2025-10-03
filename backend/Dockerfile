@@ -1,4 +1,4 @@
-# Use Node.js LTS
+# Use Node.js LTS (rebuild 2025-10-03)
 FROM node:20-alpine
 
 WORKDIR /app
