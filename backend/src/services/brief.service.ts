@@ -28,11 +28,52 @@ export class BriefService {
     const openai = getOpenAIClient();
     if (!openai) {
       console.warn('⚠️ OpenAI not available, using fallback brief');
+      // Fallback still returns full data for UI
+      const user = await prisma.user.findUnique({ where: { id: userId } });
+      const habits = await habitsService.list(userId);
+      const tasks = await tasksService.list(userId, false);
+
+      const todaySelections = await prisma.todaySelection.findMany({
+        where: {
+          userId,
+          date: new Date().toISOString().split('T')[0]
+        },
+        include: { habit: true, task: true },
+      });
+
+      const today = todaySelections.map(selection => {
+        if (selection.habit) {
+          return {
+            id: selection.habit.id,
+            name: selection.habit.title,
+            type: 'habit',
+            completed: selection.habit.lastTick ?
+              new Date(selection.habit.lastTick).toDateString() === new Date().toDateString() : false,
+            streak: selection.habit.streak,
+            color: (selection.habit as any).color ?? 'emerald',
+            reminderEnabled: (selection.habit as any).reminderEnabled ?? false,
+            reminderTime: (selection.habit as any).reminderTime ?? null,
+          };
+        } else if (selection.task) {
+          return {
+            id: selection.task.id,
+            name: selection.task.title,
+            type: 'task',
+            completed: selection.task.completed,
+            priority: selection.task.priority,
+          };
+        }
+        return null;
+      }).filter(Boolean);
+
       return {
-        mentor: "marcus",
-        message: "Begin your mission today.",
+        mentor: user?.mentorId ?? 'marcus',
+        message: 'Begin your mission today.',
         audio: null,
-        missions: [],
+        missions: habits,
+        habits,
+        tasks,
+        today,
       };
     }
 
@@ -92,6 +133,9 @@ Focus on today's pending habits and streak risks.
           completed: selection.habit.lastTick ? 
             new Date(selection.habit.lastTick).toDateString() === new Date().toDateString() : false,
           streak: selection.habit.streak,
+          color: (selection.habit as any).color ?? 'emerald',
+          reminderEnabled: (selection.habit as any).reminderEnabled ?? false,
+          reminderTime: (selection.habit as any).reminderTime ?? null,
         };
       } else if (selection.task) {
         return {

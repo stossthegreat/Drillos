@@ -58,6 +58,14 @@ export async function habitsController(fastify: FastifyInstance) {
         reminderTime: body.reminderTime ?? "08:00",
       });
 
+      // Auto-select the new habit for today's brief
+      try {
+        const { todayService } = await import('../services/today.service');
+        await todayService.selectForToday(userId, habit.id, undefined);
+      } catch (e) {
+        console.warn('⚠️ Failed to auto-select habit for today:', e);
+      }
+
       reply.code(201);
       return habit;
     } catch (e: any) {
