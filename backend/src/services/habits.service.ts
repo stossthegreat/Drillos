@@ -48,7 +48,7 @@ export class HabitsService {
         schedule: input.schedule ?? {},
         streak: 0,
         lastTick: null,
-        color: input.color,
+        color: input.color ?? 'emerald',
         context: input.context ?? {},
         reminderEnabled: input.reminderEnabled ?? false,
         reminderTime: input.reminderTime ?? null,
