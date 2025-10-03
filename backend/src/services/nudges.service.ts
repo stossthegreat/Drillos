@@ -7,8 +7,23 @@ import { EventsService } from "./events.service";
 import { VoiceService } from "./voice.service";
 import { MENTORS, type MentorId } from "../config/mentors.config";
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
+
+// Lazy OpenAI initialization - only when actually needed
+function getOpenAIClient() {
+  // Skip OpenAI initialization during build process
+  if (process.env.NODE_ENV === 'build' || process.env.RAILWAY_ENVIRONMENT === 'build') {
+    return null;
+  }
+  
+  // Validate required environment variables
+  if (!process.env.OPENAI_API_KEY) {
+    console.warn('⚠️ OpenAI API key not available, AI features will be disabled');
+    return null;
+  }
+  
+  return new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+}
 
 export class NudgesService {
   private streaksService = new StreaksService();
@@ -19,6 +34,12 @@ export class NudgesService {
    * Generate nudges for a user, based on streaks, events, and memory.
    */
   async generateNudges(userId: string) {
+    const openai = getOpenAIClient();
+    if (!openai) {
+      console.warn('⚠️ OpenAI not available, skipping nudge generation');
+      return [];
+    }
+
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new Error("User not found");
 

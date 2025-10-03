@@ -9,10 +9,24 @@ const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 const LLM_MAX_TOKENS = Number(process.env.LLM_MAX_TOKENS || 450);
 const LLM_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS || 10000);
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-  timeout: LLM_TIMEOUT_MS,
-});
+// Lazy OpenAI initialization - only when actually needed
+function getOpenAIClient() {
+  // Skip OpenAI initialization during build process
+  if (process.env.NODE_ENV === 'build' || process.env.RAILWAY_ENVIRONMENT === 'build') {
+    return null;
+  }
+  
+  // Validate required environment variables
+  if (!process.env.OPENAI_API_KEY) {
+    console.warn('⚠️ OpenAI API key not available, AI features will be disabled');
+    return null;
+  }
+  
+  return new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+    timeout: LLM_TIMEOUT_MS,
+  });
+}
 
 type GenerateOptions = {
   purpose?: 'brief' | 'nudge' | 'debrief' | 'coach' | 'alarm';
@@ -26,6 +40,12 @@ export class AIService {
    * Bypasses paywall in DEV/TEST mode.
    */
   async generateMentorReply(userId: string, mentorId: MentorId, userMessage: string, opts: GenerateOptions = {}) {
+    const openai = getOpenAIClient();
+    if (!openai) {
+      console.warn('⚠️ OpenAI not available, using fallback response');
+      return 'I am temporarily unavailable. Please try again later.';
+    }
+
     const mentor = MENTORS[mentorId];
     if (!mentor) throw new Error('Invalid mentor');
 

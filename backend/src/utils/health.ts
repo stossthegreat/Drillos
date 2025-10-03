@@ -22,9 +22,13 @@ export async function checkDependencies() {
   }
 
   try {
-    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-    await client.models.list();
-    results.openai = 'ok';
+    if (!process.env.OPENAI_API_KEY) {
+      results.openai = 'error: OpenAI API key not configured';
+    } else {
+      const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+      await client.models.list();
+      results.openai = 'ok';
+    }
   } catch (e: any) {
     results.openai = `error: ${e.message}`;
   }

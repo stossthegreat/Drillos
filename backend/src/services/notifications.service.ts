@@ -38,6 +38,12 @@ export class NotificationsService {
    * Send a push notification (immediate).
    */
   async send(userId: string, title: string, body: string) {
+    const firebaseApp = getFirebaseApp();
+    if (!firebaseApp) {
+      console.warn('⚠️ Firebase not available, skipping notification');
+      return { ok: false, error: 'Firebase not available' };
+    }
+
     initializeFirebase();
     
     if (!firebaseInitialized) {

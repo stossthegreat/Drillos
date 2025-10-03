@@ -9,10 +9,24 @@ const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 const LLM_MAX_TOKENS = Number(process.env.LLM_MAX_TOKENS || 400);
 const LLM_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS || 10000);
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-  timeout: LLM_TIMEOUT_MS,
-});
+// Lazy OpenAI initialization - only when actually needed
+function getOpenAIClient() {
+  // Skip OpenAI initialization during build process
+  if (process.env.NODE_ENV === 'build' || process.env.RAILWAY_ENVIRONMENT === 'build') {
+    return null;
+  }
+  
+  // Validate required environment variables
+  if (!process.env.OPENAI_API_KEY) {
+    console.warn('⚠️ OpenAI API key not available, AI features will be disabled');
+    return null;
+  }
+  
+  return new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+    timeout: LLM_TIMEOUT_MS,
+  });
+}
 
 type FactsPatch = Record<string, any>;
 type EventPayload = Record<string, any>;
@@ -100,6 +114,12 @@ export class MemoryService {
    * This is called by the evening loop and applied to memory.
    */
   async summarizeDay(userId: string) {
+    const openai = getOpenAIClient();
+    if (!openai) {
+      console.warn('⚠️ OpenAI not available, skipping day summary');
+      return { patch: {}, reflection: '' };
+    }
+
     // cache-key to avoid double-charge if retried
     const cacheKey = `mem:summary:${userId}:${new Date().toISOString().slice(0, 10)}`;
     const cached = await redis.get(cacheKey);
