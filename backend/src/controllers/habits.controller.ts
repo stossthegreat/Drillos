@@ -89,10 +89,17 @@ export async function habitsController(fastify: FastifyInstance) {
   fastify.delete<{
     Params: { id: string };
   }>("/api/v1/habits/:id", async (req, reply) => {
-    const userId = (req as any).user?.id || req.headers['x-user-id'] || "demo-user-123";
-    const id = req.params.id;
-    const res = await service.delete(id, userId);
-    return res;
+    try {
+      const userId = (req as any).user?.id || req.headers['x-user-id'] || "demo-user-123";
+      await ensureDemoUser(userId);
+      const id = req.params.id;
+      const res = await service.delete(id, userId);
+      reply.code(200);
+      return res;
+    } catch (e: any) {
+      reply.code(400);
+      return { error: e.message };
+    }
   });
 }
 

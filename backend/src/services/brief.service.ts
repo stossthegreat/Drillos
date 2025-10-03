@@ -2,6 +2,7 @@ import { prisma } from "../utils/db";
 import OpenAI from "openai";
 import { VoiceService } from "./voice.service";
 import { HabitsService } from "./habits.service";
+import { tasksService } from "./tasks.service";
 
 // Lazy OpenAI initialization - only when actually needed
 function getOpenAIClient() {
@@ -37,6 +38,7 @@ export class BriefService {
 
     const user = await prisma.user.findUnique({ where: { id: userId } });
     const habits = await habitsService.list(userId);
+    const tasks = await tasksService.list(userId, false); // Get incomplete tasks
 
     const completed = habits.filter(h => h.status === "completed_today").length;
     const pending = habits.length - completed;
@@ -68,11 +70,49 @@ Focus on today's pending habits and streak risks.
     const voiceResult = await voiceService.speak(userId, text, user?.mentorId ?? "marcus");
     const voiceUrl = voiceResult.url;
 
+    // Get today's selected items
+    const todaySelections = await prisma.todaySelection.findMany({
+      where: { 
+        userId,
+        date: new Date().toISOString().split('T')[0] // Today's date
+      },
+      include: {
+        habit: true,
+        task: true,
+      }
+    });
+
+    // Build today's items from selections
+    const today = todaySelections.map(selection => {
+      if (selection.habit) {
+        return {
+          id: selection.habit.id,
+          name: selection.habit.title,
+          type: 'habit',
+          completed: selection.habit.lastTick ? 
+            new Date(selection.habit.lastTick).toDateString() === new Date().toDateString() : false,
+          streak: selection.habit.streak,
+        };
+      } else if (selection.task) {
+        return {
+          id: selection.task.id,
+          name: selection.task.title,
+          type: 'task',
+          completed: selection.task.completed,
+          priority: selection.task.priority,
+        };
+      }
+      return null;
+    }).filter(Boolean);
+
     return {
       mentor: user?.mentorId,
       message: text,
       audio: voiceUrl,
       missions: habits,
+      habits: habits,
+      tasks: tasks,
+      today: today,
     };
   }
 

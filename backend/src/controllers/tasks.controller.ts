@@ -152,6 +152,7 @@ export async function tasksController(fastify: FastifyInstance) {
   }, async (req: any, reply) => {
     try {
       const userId = getUserIdOrThrow(req);
+      await ensureDemoUser(userId);
       const { id } = req.params;
       const completedTask = await service.complete(id, userId);
       return completedTask;
@@ -171,6 +172,7 @@ export async function tasksController(fastify: FastifyInstance) {
   }, async (req: any, reply) => {
     try {
       const userId = getUserIdOrThrow(req);
+      await ensureDemoUser(userId);
       const { id } = req.params;
       const result = await service.delete(id, userId);
       return result;
