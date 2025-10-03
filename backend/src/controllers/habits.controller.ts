@@ -40,25 +40,31 @@ export async function habitsController(fastify: FastifyInstance) {
 
   // Create habit
   fastify.post("/api/v1/habits", async (req, reply) => {
-    const userId = (req as any).user?.id || req.headers['x-user-id'] || "demo-user-123";
-    await ensureDemoUser(userId);
-    const body = req.body as any;
+    try {
+      const userId = (req as any).user?.id || req.headers['x-user-id'] || "demo-user-123";
+      await ensureDemoUser(userId);
+      const body = req.body as any;
 
-    const habit = await service.create(userId, {
-      title: body.title ?? body.name,
-      schedule: body.schedule ?? scheduleFromForm(body),
-      color: body.color ?? null,
-      context: {
-        difficulty: body.difficulty ?? body.intensity ?? 2,
-        category: body.category ?? "general",
-        lifeDays: 0,
-      },
-      reminderEnabled: body.reminderEnabled ?? body.reminderOn ?? false,
-      reminderTime: body.reminderTime ?? "08:00",
-    });
+      const habit = await service.create(userId, {
+        title: body.title ?? body.name,
+        schedule: body.schedule ?? scheduleFromForm(body),
+        color: body.color ?? null,
+        context: {
+          difficulty: body.difficulty ?? body.intensity ?? 2,
+          category: body.category ?? "general",
+          lifeDays: 0,
+        },
+        reminderEnabled: body.reminderEnabled ?? body.reminderOn ?? false,
+        reminderTime: body.reminderTime ?? "08:00",
+      });
 
-    reply.code(201);
-    return habit;
+      reply.code(201);
+      return habit;
+    } catch (e: any) {
+      console.error('❌ Error creating habit:', e);
+      reply.code(400);
+      return { error: e.message };
+    }
   });
 
   // Tick habit (idempotent per date)
