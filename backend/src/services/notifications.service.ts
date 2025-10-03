@@ -3,14 +3,29 @@ import admin from 'firebase-admin';
 import { prisma } from '../utils/db';
 import { redis } from '../utils/redis';
 
-if (!admin.apps.length) {
-  admin.initializeApp({
-    credential: admin.credential.cert({
-      projectId: process.env.FIREBASE_PROJECT_ID,
-      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
-    }),
-  });
+// Lazy Firebase initialization - only when actually needed
+function getFirebaseApp() {
+  if (!admin.apps.length) {
+    // Skip Firebase initialization during build process
+    if (process.env.NODE_ENV === 'build' || process.env.RAILWAY_ENVIRONMENT === 'build') {
+      return null;
+    }
+    
+    // Validate required environment variables
+    if (!process.env.FIREBASE_PROJECT_ID || !process.env.FIREBASE_CLIENT_EMAIL || !process.env.FIREBASE_PRIVATE_KEY) {
+      console.warn('⚠️ Firebase credentials not available, notifications will be disabled');
+      return null;
+    }
+    
+    admin.initializeApp({
+      credential: admin.credential.cert({
+        projectId: process.env.FIREBASE_PROJECT_ID,
+        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+        privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+      }),
+    });
+  }
+  return admin.app();
 }
 
 export class NotificationsService {
@@ -18,6 +33,12 @@ export class NotificationsService {
    * Send a push notification (immediate).
    */
   async send(userId: string, title: string, body: string) {
+    const firebaseApp = getFirebaseApp();
+    if (!firebaseApp) {
+      console.warn('⚠️ Firebase not available, skipping notification');
+      return { ok: false, error: 'Firebase not available' };
+    }
+
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new Error('User not found');
     if (!(user as any).fcmToken) throw new Error('User missing fcmToken');

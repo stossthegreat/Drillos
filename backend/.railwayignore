@@ -11,5 +11,4 @@ yarn-error.log*
 *.log
 coverage
 .nyc_output
-dist
 *.tsbuildinfo

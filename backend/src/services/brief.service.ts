@@ -3,12 +3,38 @@ import OpenAI from "openai";
 import { VoiceService } from "./voice.service";
 import { HabitsService } from "./habits.service";
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+// Lazy OpenAI initialization - only when actually needed
+function getOpenAIClient() {
+  // Skip OpenAI initialization during build process
+  if (process.env.NODE_ENV === 'build' || process.env.RAILWAY_ENVIRONMENT === 'build') {
+    return null;
+  }
+  
+  // Validate required environment variables
+  if (!process.env.OPENAI_API_KEY) {
+    console.warn('⚠️ OpenAI API key not available, AI features will be disabled');
+    return null;
+  }
+  
+  return new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+}
+
 const voiceService = new VoiceService();
 const habitsService = new HabitsService();
 
 export class BriefService {
   async getTodaysBrief(userId: string) {
+    const openai = getOpenAIClient();
+    if (!openai) {
+      console.warn('⚠️ OpenAI not available, using fallback brief');
+      return {
+        mentor: "marcus",
+        message: "Begin your mission today.",
+        audio: null,
+        missions: [],
+      };
+    }
+
     const user = await prisma.user.findUnique({ where: { id: userId } });
     const habits = await habitsService.list(userId);
 
@@ -51,6 +77,17 @@ Focus on today's pending habits and streak risks.
   }
 
   async getEveningDebrief(userId: string) {
+    const openai = getOpenAIClient();
+    if (!openai) {
+      console.warn('⚠️ OpenAI not available, using fallback debrief');
+      return {
+        mentor: "drill",
+        message: "Reflect and prepare for tomorrow.",
+        audio: null,
+        stats: { completed: 0, total: 0 },
+      };
+    }
+
     const user = await prisma.user.findUnique({ where: { id: userId } });
     const habits = await habitsService.list(userId);
 

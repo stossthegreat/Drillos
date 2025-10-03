@@ -8,7 +8,7 @@ let client: Redis | null = null;
 function makeClient(): Redis {
   const c = new IORedis(ENV.REDIS_URL, {
     lazyConnect: false,
-    maxRetriesPerRequest: 2,
+    maxRetriesPerRequest: null, // Required for BullMQ blocking operations
     enableOfflineQueue: false,
   });
 
