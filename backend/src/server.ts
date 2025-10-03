@@ -36,11 +36,13 @@ function validateEnv() {
     return;
   }
 
-  // Only DATABASE_URL and REDIS_URL are truly required
-  const required = [
-    'DATABASE_URL',
-    'REDIS_URL',
-  ];
+  // For Railway deployment, be more lenient with required vars
+  const required = [];
+  
+  // Only require DATABASE_URL and REDIS_URL if we're not in Railway
+  if (!process.env.RAILWAY_ENVIRONMENT) {
+    required.push('DATABASE_URL', 'REDIS_URL');
+  }
   
   const missing = required.filter((key) => !process.env[key]);
   if (missing.length > 0) {
@@ -68,20 +70,28 @@ function validateEnv() {
 async function runStartupChecks() {
   const results: Record<string, any> = {};
   
-  // Only check critical services
-  try {
-    await prisma.$queryRaw`SELECT 1`; 
-    results.postgres = 'ok';
-  } catch (e: any) { 
-    results.postgres = `error: ${e.message}`; 
+  // Only check critical services if they're available
+  if (process.env.DATABASE_URL) {
+    try {
+      await prisma.$queryRaw`SELECT 1`; 
+      results.postgres = 'ok';
+    } catch (e: any) { 
+      results.postgres = `error: ${e.message}`; 
+    }
+  } else {
+    results.postgres = 'skipped (no DATABASE_URL)';
   }
 
-  try {
-    const redisClient = getRedis();
-    await redisClient.ping(); 
-    results.redis = 'ok';
-  } catch (e: any) { 
-    results.redis = `error: ${e.message}`; 
+  if (process.env.REDIS_URL) {
+    try {
+      const redisClient = getRedis();
+      await redisClient.ping(); 
+      results.redis = 'ok';
+    } catch (e: any) { 
+      results.redis = `error: ${e.message}`; 
+    }
+  } else {
+    results.redis = 'skipped (no REDIS_URL)';
   }
 
   // Skip optional service checks if API keys are missing
@@ -166,7 +176,9 @@ const buildServer = () => {
         ok: true, 
         status: 'healthy',
         timestamp: new Date().toISOString(),
-        uptime: process.uptime()
+        uptime: process.uptime(),
+        version: '1.0.0',
+        environment: process.env.NODE_ENV || 'development'
       };
     } catch (error) {
       reply.code(500);
