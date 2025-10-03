@@ -39,7 +39,7 @@ export default async function briefRoutes(fastify: FastifyInstance, _opts: Fasti
     }
   }
   
-  // GET /v1/brief/today
+  // GET /v1/brief/today - returns habits, tasks, and today's selections
   fastify.get('/v1/brief/today', {
     schema: { 
       tags: ['Brief'], 
