@@ -862,17 +862,11 @@ class _NewHomeScreenState extends State<NewHomeScreen> with TickerProviderStateM
       final itemType = item['type'] ?? 'habit';
       if (itemType == 'task') {
         await apiClient.completeTask(item['id'].toString());
-        // For tasks, mark as completed locally but keep in list
-        setState(() {
-          final index = todayItems.indexWhere((i) => i['id'] == item['id']);
-          if (index != -1) {
-            todayItems[index]['completed'] = true;
-          }
-        });
       } else {
         await apiClient.tickHabit(item['id'].toString());
-        _loadData(); // Refresh for habits to get updated streak
       }
+      // Always refresh from API after any mutation
+      await _loadData();
       HapticFeedback.selectionClick();
     } catch (e) {
       print('❌ Error toggling completion: $e');

@@ -74,21 +74,15 @@ class _HabitsScreenState extends State<HabitsScreen> {
         'schedule': { 'type': 'daily' },
         'difficulty': difficulty,
       });
-      setState(() { 
-        habits.add(created); 
-      });
       
-      // Automatically add new habit to today
-      try {
-        await apiClient.selectForToday(created['id']);
-      } catch (e) {
-        print('Error auto-selecting new habit: $e');
-      }
+      // Don't update local state - let API handle it
+      // The backend auto-selects the habit for today
       
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('✅ Habit created and added to today!')),
         );
+        // Force refresh by going to home with timestamp
         context.go('/home?refresh=${DateTime.now().millisecondsSinceEpoch}');
       }
     } catch (e) {
@@ -105,19 +99,20 @@ class _HabitsScreenState extends State<HabitsScreen> {
     try {
       apiClient.setAuthToken("valid-token");
       final today = DateTime.now().toIso8601String().split('T')[0];
-      final created = await apiClient.createHabit({
+      final created = await apiClient.createTask({
         'title': title,
-        'type': 'task',
-        'schedule': { 'type': 'one_off', 'date': today },
+        'dueDate': DateTime.now().add(const Duration(days: 1)).toUtc().toIso8601String(),
+        'priority': 2,
       });
-      setState(() { 
-        tasks.add(created); 
-      });
+      
+      // Don't update local state - let API handle it
+      
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('✅ Task created')),
         );
-        context.go('/home');
+        // Force refresh by going to home with timestamp
+        context.go('/home?refresh=${DateTime.now().millisecondsSinceEpoch}');
       }
     } catch (e) {
       print('Error creating task: $e'); // Debug logging

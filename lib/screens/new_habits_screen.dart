@@ -242,14 +242,11 @@ class _NewHabitsScreenState extends State<NewHabitsScreen> with TickerProviderSt
           Toast.show(context, '✅ Habit created and added to today!');
         }
         
-        // Update local state
-        setState(() { 
-          allItems.add(created); 
-        });
-        
+        // Don't update local state - let API handle it
         _closeModal();
         
         if (mounted) {
+          // Force refresh by going to home with timestamp
           context.go('/home?refresh=${DateTime.now().millisecondsSinceEpoch}');
         }
       }
@@ -263,18 +260,32 @@ class _NewHabitsScreenState extends State<NewHabitsScreen> with TickerProviderSt
 
   Future<void> _deleteItem(String itemId) async {
     try {
-      // Delete item based on type
-      // Delete based on item type
-    final item = allItems.firstWhere((i) => i['id'].toString() == itemId);
-    if (item['type'] == 'habit') {
-      await apiClient.deleteHabit(itemId);
-    } else if (item['type'] == 'task') {
-      await apiClient.deleteTask(itemId);
-    }
-      _loadData();
+      // Find item to determine type
+      final item = allItems.firstWhere((i) => i['id'].toString() == itemId);
+      
+      // Delete from API based on type
+      if (item['type'] == 'habit') {
+        await apiClient.deleteHabit(itemId);
+      } else if (item['type'] == 'task') {
+        await apiClient.deleteTask(itemId);
+      }
+      
+      // Always refresh from API after deletion
+      await _loadData();
       HapticFeedback.heavyImpact();
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('✅ Item deleted')),
+        );
+      }
     } catch (e) {
       print('❌ Error deleting item: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to delete: $e')),
+        );
+      }
     }
   }
 
