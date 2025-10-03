@@ -2,6 +2,7 @@
 import { FastifyInstance, FastifyPluginOptions } from 'fastify';
 import { briefService } from '../services/brief.service';
 import { todayService } from '../services/today.service';
+import { prisma } from '../utils/db';
 
 function getUserIdOrThrow(req: any): string {
   const uid = req?.user?.id || req.headers['x-user-id'];
@@ -12,6 +13,32 @@ function getUserIdOrThrow(req: any): string {
 }
 
 export default async function briefRoutes(fastify: FastifyInstance, _opts: FastifyPluginOptions) {
+  
+  // Helper to ensure demo user exists
+  async function ensureDemoUser(userId: string) {
+    if (userId === "demo-user-123") {
+      const existingUser = await prisma.user.findUnique({ where: { id: userId } });
+      if (!existingUser) {
+        await prisma.user.create({
+          data: {
+            id: userId,
+            email: "demo@drillsergeant.com",
+            tz: "Europe/London",
+            tone: "balanced",
+            intensity: 2,
+            consentRoast: false,
+            plan: "FREE",
+            mentorId: "marcus",
+            nudgesEnabled: true,
+            briefsEnabled: true,
+            debriefsEnabled: true,
+          },
+        });
+        console.log("✅ Created demo user:", userId);
+      }
+    }
+  }
+  
   // GET /v1/brief/today
   fastify.get('/v1/brief/today', {
     schema: { 
@@ -25,6 +52,7 @@ export default async function briefRoutes(fastify: FastifyInstance, _opts: Fasti
   }, async (req, reply) => {
     try {
       const userId = getUserIdOrThrow(req);
+      await ensureDemoUser(userId);
       return await briefService.getTodaysBrief(userId);
     } catch (e: any) {
       return reply.code(400).send({ error: e.message });
@@ -44,6 +72,7 @@ export default async function briefRoutes(fastify: FastifyInstance, _opts: Fasti
   }, async (req, reply) => {
     try {
       const userId = getUserIdOrThrow(req);
+      await ensureDemoUser(userId);
       return await briefService.getEveningDebrief(userId);
     } catch (e: any) {
       return reply.code(400).send({ error: e.message });
@@ -68,6 +97,7 @@ export default async function briefRoutes(fastify: FastifyInstance, _opts: Fasti
   }, async (req: any, reply) => {
     try {
       const userId = getUserIdOrThrow(req);
+      await ensureDemoUser(userId);
       const body = req.body as { habitId?: string; taskId?: string; date?: string };
       if (!body.habitId && !body.taskId) {
         return reply.code(400).send({ error: 'habitId or taskId is required' });
