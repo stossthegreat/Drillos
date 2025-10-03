@@ -5,7 +5,7 @@
   "main": "dist/server.js",
   "scripts": {
     "dev": "nodemon --watch 'src/**/*.ts' --exec ts-node src/server.ts",
-    "build": "CI=false tsc && (prisma generate || echo 'Prisma generate failed - continuing')",
+    "build": "tsc && prisma generate",
     "start": "node dist/server.js",
     "postinstall": "prisma generate",
     "worker:notifications": "node dist/notifications/notifications.worker.js",

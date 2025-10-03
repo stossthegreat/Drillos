@@ -63,7 +63,6 @@ export class TasksService {
       priority: updates.priority,
       category: updates.category,
       completed: updates.completed,
-      completedAt: updates.completed ? new Date() : null,
     };
 
     return prisma.task.update({

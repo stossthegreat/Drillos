@@ -8,8 +8,8 @@ COPY package*.json ./
 COPY tsconfig.json ./
 COPY prisma ./prisma
 
-# Install dependencies
-RUN npm ci --only=production
+# Install ALL dependencies (including dev dependencies for build)
+RUN npm ci
 
 # Copy all source
 COPY . .
@@ -20,6 +20,9 @@ RUN npm run build
 
 # Remove dev dependencies to reduce image size
 RUN npm prune --production
+
+# Expose port
+EXPOSE 8080
 
 # Run Prisma migrations on startup
 CMD npx prisma migrate deploy && node dist/server.js
