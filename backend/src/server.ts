@@ -6,7 +6,7 @@ import swaggerUI from '@fastify/swagger-ui';
 import dotenv from 'dotenv';
 
 import { prisma } from './utils/db';
-import { redis } from './utils/redis';
+import { getRedis } from './utils/redis';
 import OpenAI from 'openai';
 import Stripe from 'stripe';
 import admin from 'firebase-admin';
@@ -236,7 +236,7 @@ const start = async () => {
 process.on('SIGINT', async () => {
   console.log('⏹️ Shutting down gracefully...');
   await prisma.$disconnect();
-  await redis.quit();
+  await getRedis().quit();
   process.exit(0);
 });
 
