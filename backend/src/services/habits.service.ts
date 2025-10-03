@@ -34,6 +34,10 @@ export class HabitsService {
     }));
   }
 
+  async getById(id: string, userId: string) {
+    return prisma.habit.findFirst({ where: { id, userId } });
+  }
+
   async create(userId: string, input: CreateHabitInput) {
     const habit = await prisma.habit.create({
       data: {
@@ -137,3 +141,5 @@ function addDays(d: Date, n: number) {
   x.setUTCDate(x.getUTCDate() + n);
   return x;
 }
+
+export const habitsService = new HabitsService();
