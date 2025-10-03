@@ -6,7 +6,7 @@ import swaggerUI from '@fastify/swagger-ui';
 import dotenv from 'dotenv';
 
 import { prisma } from './utils/db';
-import { redis } from './utils/redis';
+import { redis, getRedis } from './utils/redis';
 import OpenAI from 'openai';
 import Stripe from 'stripe';
 import admin from 'firebase-admin';
