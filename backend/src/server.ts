@@ -204,6 +204,17 @@ const buildServer = () => {
       return { ok: false, error: 'Health check failed' };
     }
   });
+
+  // Railway-specific health check endpoint
+  fastify.get('/healthz', async (request, reply) => {
+    try {
+      // Ultra-simple health check for Railway
+      return { status: 'ok' };
+    } catch (error) {
+      reply.code(500);
+      return { status: 'error' };
+    }
+  });
   
   fastify.get('/startup-check', async () => {
     const checks = await runStartupChecks();
