@@ -65,18 +65,34 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
       
       // Fallback: if today is empty but habits exist, use a subset of habits as today
       List<dynamic> today = brief['today'] ?? [];
-      if (today.isEmpty && brief['habits'] != null) {
-        final habits = brief['habits'] as List;
+
+      // If brief does not include habits or is empty, load habits directly
+      List<dynamic> habitsFromBrief = (brief['habits'] as List?) ?? [];
+      if (habitsFromBrief.isEmpty) {
+        try {
+          habitsFromBrief = await apiClient.getHabits();
+        } catch (e) {
+          print('⚠️ Failed to load habits directly: $e');
+        }
+      }
+
+      if (today.isEmpty && habitsFromBrief.isNotEmpty) {
+        final habits = habitsFromBrief;
         print('📋 Today is empty, using fallback with ${habits.length} habits');
         // Use first 3 habits as today's items for now
         today = habits.take(3).map((habit) => {
           'id': habit['id'],
           'name': habit['title'] ?? habit['name'],
           'type': 'habit',
-          'completed': habit['status'] == 'completed',
+          'completed': habit['status'] == 'completed_today' || habit['status'] == 'completed',
           'streak': habit['streak'] ?? 0,
+          'color': habit['color'] ?? 'emerald',
+          'reminderEnabled': habit['reminderEnabled'] ?? false,
+          'reminderTime': habit['reminderTime'],
         }).toList();
         print('📋 Fallback today items: ${today.length}');
+        // Ensure brief has habits for preview section
+        brief['habits'] = habitsFromBrief;
       }
       
       setState(() {

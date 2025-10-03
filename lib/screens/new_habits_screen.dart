@@ -660,9 +660,19 @@ class _NewHabitsScreenState extends State<NewHabitsScreen> with TickerProviderSt
           // Action buttons
           Row(
             children: [
-              _buildActionButton('Calendar', Icons.calendar_today, () {}),
+              _buildActionButton('Calendar', Icons.calendar_today, () {
+                // TODO: Open calendar/scheduler modal
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Scheduler coming soon!')),
+                );
+              }),
               const SizedBox(width: 8),
-              _buildActionButton('Stats', Icons.bar_chart, () {}),
+              _buildActionButton('Stats', Icons.bar_chart, () {
+                // TODO: Open stats screen
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Stats coming soon!')),
+                );
+              }),
               const Spacer(),
               _buildActionButton('Delete', Icons.delete, () => _deleteItem(item['id'].toString()),
                                 color: const Color(0xFFE11D48)),

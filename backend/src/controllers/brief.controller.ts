@@ -59,8 +59,8 @@ export default async function briefRoutes(fastify: FastifyInstance, _opts: Fasti
       const { tasksService } = await import('../services/tasks.service');
       const habitsService = new HabitsService();
       
-      const habits = await habitsService.list(userId);
-      const tasks = await tasksService.list(userId, false);
+             const habits = await habitsService.list(userId);
+             const tasks = await tasksService.list(userId, true); // Include completed tasks
       const todaySelections = await prisma.todaySelection.findMany({
         where: { userId, date: new Date().toISOString().split('T')[0] },
         include: { habit: true, task: true },
@@ -154,8 +154,8 @@ export default async function briefRoutes(fastify: FastifyInstance, _opts: Fasti
       const { tasksService } = await import('../services/tasks.service');
       const habitsService = new HabitsService();
       
-      const habits = await habitsService.list(userId);
-      const tasks = await tasksService.list(userId, false);
+             const habits = await habitsService.list(userId);
+             const tasks = await tasksService.list(userId, true); // Include completed tasks
       
       return { 
         success: true, 

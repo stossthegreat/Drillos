@@ -78,8 +78,8 @@ export class BriefService {
     }
 
     const user = await prisma.user.findUnique({ where: { id: userId } });
-    const habits = await habitsService.list(userId);
-    const tasks = await tasksService.list(userId, false); // Get incomplete tasks
+           const habits = await habitsService.list(userId);
+           const tasks = await tasksService.list(userId, true); // Include completed tasks
 
     const completed = habits.filter(h => h.status === "completed_today").length;
     const pending = habits.length - completed;
