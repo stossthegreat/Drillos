@@ -1,13 +1,22 @@
+import { prisma } from '../utils/db';
+import { habitsService } from './habits.service';
+import { tasksService } from './tasks.service';
+
 export class TodayService {
+  /**
+   * Get all items (habits + tasks) selected for today
+   */
   async getTodayItems(userId: string, dateString?: string) {
-    const date = dateString ? dateString : new Date().toISOString().split('T')[0];
+    const date = dateString
+      ? dateString
+      : new Date().toISOString().split('T')[0];
 
     const selections = await prisma.todaySelection.findMany({
       where: { userId, date },
       orderBy: { order: 'asc' },
     });
 
-    const items = [];
+    const items: any[] = [];
     for (const selection of selections) {
       if (selection.habitId) {
         const habit = await habitsService.getById(selection.habitId, userId);
@@ -31,21 +40,37 @@ export class TodayService {
         }
       }
     }
+
     return items;
   }
 
-  async selectForToday(userId: string, habitId?: string, taskId?: string, dateString?: string) {
+  /**
+   * Select a habit or task for today
+   */
+  async selectForToday(
+    userId: string,
+    habitId?: string,
+    taskId?: string,
+    dateString?: string
+  ) {
     if (!habitId && !taskId) {
-      throw new Error("Either habitId or taskId must be provided");
+      throw new Error('Either habitId or taskId must be provided');
     }
-    const date = dateString ? dateString : new Date().toISOString().split('T')[0];
+
+    const date = dateString
+      ? dateString
+      : new Date().toISOString().split('T')[0];
 
     // Check if already selected
     const existing = await prisma.todaySelection.findFirst({
-      where: { userId, date, OR: [{ habitId }, { taskId }] },
+      where: {
+        userId,
+        date,
+        OR: [{ habitId }, { taskId }],
+      },
     });
     if (existing) {
-      return existing; // Already selected, return existing
+      return existing; // Already selected
     }
 
     // Get max order for the day
@@ -55,6 +80,7 @@ export class TodayService {
     });
     const newOrder = (maxOrder._max.order || 0) + 1;
 
+    // Create new selection
     const selection = await prisma.todaySelection.create({
       data: {
         userId,
@@ -64,8 +90,40 @@ export class TodayService {
         order: newOrder,
       },
     });
+
     return selection;
   }
 
-  async deselectForToday(userId: string, habitId?: string, taskId?: string, dateString?: string) {
+  /**
+   * Deselect (remove) a habit or task from today
+   */
+  async deselectForToday(
+    userId: string,
+    habitId?: string,
+    taskId?: string,
+    dateString?: string
+  ) {
+    const date = dateString
+      ? dateString
+      : new Date().toISOString().split('T')[0];
+
+    const existing = await prisma.todaySelection.findFirst({
+      where: {
+        userId,
+        date,
+        OR: [{ habitId }, { taskId }],
+      },
+    });
+
+    if (existing) {
+      await prisma.todaySelection.delete({
+        where: { id: existing.id },
+      });
+      return existing;
+    }
+
+    return null;
+  }
+}
+
 export const todayService = new TodayService();
