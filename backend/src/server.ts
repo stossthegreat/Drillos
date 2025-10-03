@@ -267,7 +267,7 @@ const start = async () => {
 process.on('SIGINT', async () => {
   console.log('⏹️ Shutting down gracefully...');
   await prisma.$disconnect();
-  await redis.quit();
+  await getRedis().quit();
   process.exit(0);
 });
 
