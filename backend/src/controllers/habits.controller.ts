@@ -60,10 +60,12 @@ export async function habitsController(fastify: FastifyInstance) {
 
       // Auto-select the new habit for today's brief
       try {
+        console.log('🔄 Auto-selecting habit for today:', habit.id);
         const { todayService } = await import('../services/today.service');
-        await todayService.selectForToday(userId, habit.id, undefined);
+        const result = await todayService.selectForToday(userId, habit.id, undefined);
+        console.log('✅ Auto-selected habit result:', result);
       } catch (e) {
-        console.warn('⚠️ Failed to auto-select habit for today:', e);
+        console.error('❌ Failed to auto-select habit for today:', e);
       }
 
       reply.code(201);
