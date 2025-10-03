@@ -159,7 +159,12 @@ async function runStartupChecks() {
 const buildServer = () => {
   const fastify = Fastify({ logger: true });
 
-  fastify.register(cors, { origin: true });
+  fastify.register(cors, { 
+    origin: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-user-id', 'idempotency-key'],
+    credentials: true
+  });
   fastify.register(swagger, {
     openapi: {
       openapi: '3.0.0',
