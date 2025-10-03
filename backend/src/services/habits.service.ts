@@ -34,6 +34,12 @@ export class HabitsService {
     }));
   }
 
+  async getById(habitId: string, userId: string) {
+    return prisma.habit.findFirst({
+      where: { id: habitId, userId },
+    });
+  }
+
   async create(userId: string, input: CreateHabitInput) {
     const habit = await prisma.habit.create({
       data: {
