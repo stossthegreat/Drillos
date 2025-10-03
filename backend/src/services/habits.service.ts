@@ -34,10 +34,6 @@ export class HabitsService {
     }));
   }
 
-  async getById(habitId: string, userId: string) {
-    return prisma.habit.findFirst({
-      where: { id: habitId, userId },
-    });
   async getById(id: string, userId: string) {
     const habit = await prisma.habit.findFirst({
       where: { id, userId },
