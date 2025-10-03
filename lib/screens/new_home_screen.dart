@@ -105,6 +105,7 @@ class _NewHomeScreenState extends State<NewHomeScreen> with TickerProviderStateM
     setState(() => isLoading = true);
     try {
       apiClient.setAuthToken('valid-token');
+      apiClient.setUserId('demo-user-123');
       
       // Load today's brief using existing endpoint
       final briefResult = await apiClient.getBriefToday();

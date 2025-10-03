@@ -179,6 +179,29 @@ const buildServer = () => {
     };
   });
 
+  // Dev helper: ensure demo user exists
+  fastify.addHook('onReady', async () => {
+    try {
+      const id = 'demo-user-123';
+      const u = await prisma.user.findUnique({ where: { id } });
+      if (!u) {
+        await prisma.user.create({
+          data: {
+            id,
+            email: 'demo@example.com',
+            tone: 'balanced' as any,
+            intensity: 2,
+            mentorId: 'drill',
+            plan: 'FREE' as any,
+          },
+        });
+        console.log('👤 Created demo user:', id);
+      }
+    } catch (e) {
+      console.warn('⚠️ Could not ensure demo user:', (e as any)?.message);
+    }
+  });
+
   // health + startup-check
   fastify.get('/health', async (request, reply) => {
     try {

@@ -92,6 +92,7 @@ class _NewHabitsScreenState extends State<NewHabitsScreen> with TickerProviderSt
     setState(() => isLoading = true);
     try {
       apiClient.setAuthToken('valid-token');
+      apiClient.setUserId('demo-user-123');
       
       // Load habits and tasks using existing endpoints
       final habitsResult = await apiClient.getHabits();
@@ -161,11 +162,15 @@ class _NewHabitsScreenState extends State<NewHabitsScreen> with TickerProviderSt
           created = await apiClient.createTask({
             'title': data['name'].toString().trim(),
             'description': data['category'] ?? '',
-            'dueDate': data['endDate'] ?? DateTime.now().add(const Duration(days: 1)).toIso8601String(),
+            // Ensure RFC3339 date-time with seconds and Z
+            'dueDate': (data['endDate'] != null && data['endDate'].toString().isNotEmpty)
+                ? DateTime.parse(data['endDate']).toUtc().toIso8601String()
+                : DateTime.now().add(const Duration(days: 1)).toUtc().toIso8601String(),
             'color': data['color'],
             'reminderEnabled': data['reminderOn'],
             'reminderTime': data['reminderTime'],
-            'priority': data['intensity'] == 3 ? 'high' : data['intensity'] == 2 ? 'medium' : 'low',
+            // Backend expects number 1..3
+            'priority': (data['intensity'] is int) ? data['intensity'] : 2,
           });
           
           // Create alarm for task reminder

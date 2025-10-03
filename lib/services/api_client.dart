@@ -4,12 +4,17 @@ import 'package:http/http.dart' as http;
 class ApiClient {
   String baseUrl;
   String? _authToken;
+  String _userId = 'demo-user-123';
 
   ApiClient({String? baseUrl})
       : baseUrl = baseUrl ?? const String.fromEnvironment('API_BASE_URL', defaultValue: 'https://drillos-production.up.railway.app');
 
   void setAuthToken(String token) {
     _authToken = token;
+  }
+
+  void setUserId(String userId) {
+    _userId = userId.trim().isEmpty ? 'demo-user-123' : userId.trim();
   }
 
   void setBaseUrl(String url) {
@@ -50,6 +55,7 @@ class ApiClient {
 
   Map<String, String> get _headers => {
     'Content-Type': 'application/json',
+    'x-user-id': _userId,
     if (_authToken != null) 'Authorization': 'Bearer $_authToken',
   };
 
