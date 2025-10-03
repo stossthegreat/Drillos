@@ -105,7 +105,7 @@ class ApiClient {
   // ============ BRIEF ============
   Future<Map<String, dynamic>> getBriefToday() async {
     final response = await http.get(
-      Uri.parse('$baseUrl/v1/brief/today'),
+      Uri.parse('$baseUrl/v1/brief/test'),
       headers: _headers,
     );
     if (response.statusCode == 200) {
