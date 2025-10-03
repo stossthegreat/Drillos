@@ -1,5 +1,6 @@
 import { prisma } from '../utils/db';
-import { habitsService } from './habits.service';
+import { HabitsService } from './habits.service';
+const habitsService = new HabitsService();
 import { tasksService } from './tasks.service';
 
 export class TodayService {
