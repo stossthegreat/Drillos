@@ -5,7 +5,7 @@ import { prisma } from "../utils/db";
 export async function habitsController(fastify: FastifyInstance) {
   const service = new HabitsService();
 
-  // Helper to ensure demo user exists
+  // Helper to ensure demo user exists before operations
   async function ensureDemoUser(userId: string) {
     if (userId === "demo-user-123") {
       const existingUser = await prisma.user.findUnique({ where: { id: userId } });
