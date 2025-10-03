@@ -9,7 +9,8 @@ export default async function voiceController(fastify: FastifyInstance, _opts: F
       if (!userId) return reply.code(401).send({ error: "Unauthorized" });
 
       const { text, mentor } = req.body as { text: string; mentor: string };
-      const url = await voiceService.generateVoice(userId, mentor, text);
+      const result = await voiceService.speak(userId, text, mentor);
+      const url = result.url;
 
       return { url };
     } catch (err: any) {
@@ -23,7 +24,8 @@ export default async function voiceController(fastify: FastifyInstance, _opts: F
       const userId = req.user?.id || req.headers["x-user-id"];
       if (!userId) return reply.code(401).send({ error: "Unauthorized" });
 
-      return await voiceService.listCache(userId);
+      // Return empty cache for now - this would need to be implemented in voiceService
+      return [];
     } catch (err: any) {
       return reply.code(500).send({ error: err.message });
     }

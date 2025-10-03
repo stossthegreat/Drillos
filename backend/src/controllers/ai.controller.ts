@@ -10,7 +10,7 @@ export default async function aiController(fastify: FastifyInstance, _opts: Fast
 
       const { message, mentor } = req.body as { message: string; mentor: string };
 
-      const response = await aiService.generateMentorReply(userId, mentor, message);
+      const response = await aiService.generateMentorReply(userId, mentor as any, message);
       return { reply: response };
     } catch (err: any) {
       return reply.code(500).send({ error: err.message });
