@@ -1,0 +1,54 @@
+name: Quick APK Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: 'Build type'
+        required: true
+        default: 'debug'
+        type: choice
+        options:
+        - debug
+        - release
+
+jobs:
+  quick-build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Setup Java
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'zulu'
+        java-version: '17'
+        
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: '3.24.0'
+        channel: 'stable'
+        cache: true
+        
+    - name: Get dependencies
+      run: flutter pub get
+      
+    - name: Build APK
+      run: flutter build apk --${{ github.event.inputs.build_type }}
+      
+    - name: Upload APK
+      uses: actions/upload-artifact@v4
+      with:
+        name: drillos-${{ github.event.inputs.build_type }}-apk
+        path: build/app/outputs/flutter-apk/app-${{ github.event.inputs.build_type }}.apk
+        retention-days: 7
+        
+    - name: Quick Summary
+      run: |
+        echo "## ⚡ Quick APK Build Complete!" >> $GITHUB_STEP_SUMMARY
+        echo "- **Type**: ${{ github.event.inputs.build_type }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Size**: $(du -h build/app/outputs/flutter-apk/app-${{ github.event.inputs.build_type }}.apk | cut -f1)" >> $GITHUB_STEP_SUMMARY
+        echo "- **Ready to download!** ⬇️" >> $GITHUB_STEP_SUMMARY

@@ -1,0 +1,61 @@
+name: Build APK Variants
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-variants:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        variant: [debug, release]
+        
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Setup Java
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'zulu'
+        java-version: '17'
+        
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: '3.24.0'
+        channel: 'stable'
+        cache: true
+        
+    - name: Get Flutter dependencies
+      run: flutter pub get
+      
+    - name: Build APK (${{ matrix.variant }})
+      run: flutter build apk --${{ matrix.variant }}
+      
+    - name: Build App Bundle (${{ matrix.variant }})
+      run: flutter build appbundle --${{ matrix.variant }}
+      
+    - name: Upload APK Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: drillos-${{ matrix.variant }}-apk
+        path: build/app/outputs/flutter-apk/app-${{ matrix.variant }}.apk
+        retention-days: 30
+        
+    - name: Upload App Bundle Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: drillos-${{ matrix.variant }}-bundle
+        path: build/app/outputs/bundle/${{ matrix.variant }}/app-${{ matrix.variant }}.aab
+        retention-days: 30
+        
+    - name: Generate Variant Summary
+      run: |
+        echo "## 📱 ${{ matrix.variant }} Build Complete" >> $GITHUB_STEP_SUMMARY
+        echo "- **APK Size**: $(du -h build/app/outputs/flutter-apk/app-${{ matrix.variant }}.apk | cut -f1)" >> $GITHUB_STEP_SUMMARY
+        echo "- **Bundle Size**: $(du -h build/app/outputs/bundle/${{ matrix.variant }}/app-${{ matrix.variant }}.aab | cut -f1)" >> $GITHUB_STEP_SUMMARY

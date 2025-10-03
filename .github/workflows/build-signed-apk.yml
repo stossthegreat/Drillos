@@ -1,0 +1,101 @@
+name: Build Signed APK (Production)
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: 'Build type'
+        required: true
+        default: 'release'
+        type: choice
+        options:
+        - release
+        - debug
+
+jobs:
+  build-signed-apk:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Setup Java
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'zulu'
+        java-version: '17'
+        
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: '3.24.0'
+        channel: 'stable'
+        cache: true
+        
+    - name: Get Flutter dependencies
+      run: flutter pub get
+      
+    - name: Verify Flutter installation
+      run: flutter doctor -v
+      
+    - name: Run Flutter tests
+      run: flutter test
+      
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v3
+      
+    - name: Create keystore (for demo purposes)
+      run: |
+        keytool -genkey -v -keystore android/app/upload-keystore.jks -keyalg RSA -keysize 2048 -validity 10000 -alias upload -storepass android -keypass android -dname "CN=DrillSergeantX, OU=Dev, O=DrillSergeantX, L=City, S=State, C=US"
+        
+    - name: Build APK
+      run: |
+        if [ "${{ github.event.inputs.build_type || 'release' }}" = "debug" ]; then
+          flutter build apk --debug
+        else
+          flutter build apk --release
+        fi
+        
+    - name: Upload APK Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: drillos-signed-apk-${{ github.event.inputs.build_type || 'release' }}
+        path: build/app/outputs/flutter-apk/app-${{ github.event.inputs.build_type || 'release' }}.apk
+        retention-days: 90
+        
+    - name: Create Release (if tagged)
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: build/app/outputs/flutter-apk/app-release.apk
+        generate_release_notes: true
+        draft: false
+        prerelease: false
+        
+    - name: Generate Build Summary
+      run: |
+        echo "## 🚀 DrillSergeantX APK Build Complete!" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 📱 Build Details" >> $GITHUB_STEP_SUMMARY
+        echo "- **Build Type**: ${{ github.event.inputs.build_type || 'release' }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Flutter Version**: $(flutter --version | head -n1)" >> $GITHUB_STEP_SUMMARY
+        echo "- **Build Time**: $(date)" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 📦 APK Information" >> $GITHUB_STEP_SUMMARY
+        echo "- **File**: app-${{ github.event.inputs.build_type || 'release' }}.apk" >> $GITHUB_STEP_SUMMARY
+        echo "- **Size**: $(du -h build/app/outputs/flutter-apk/app-${{ github.event.inputs.build_type || 'release' }}.apk | cut -f1)" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 🎯 Features Included" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ Habits tracking with streaks" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ AI-powered nudges and coaching" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ Voice AI with legendary mentors" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ Smart alarms and reminders" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ Achievement system" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ Modern glass UI design" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 📥 Download" >> $GITHUB_STEP_SUMMARY
+        echo "APK is available in the **Artifacts** section below ⬇️" >> $GITHUB_STEP_SUMMARY
