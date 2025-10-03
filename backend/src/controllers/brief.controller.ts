@@ -1,6 +1,7 @@
 // src/controllers/brief.controller.ts
 import { FastifyInstance, FastifyPluginOptions } from 'fastify';
 import { briefService } from '../services/brief.service';
+import { todayService } from '../services/today.service';
 
 function getUserIdOrThrow(req: any): string {
   const uid = req?.user?.id || req.headers['x-user-id'];
@@ -51,29 +52,28 @@ export default async function briefRoutes(fastify: FastifyInstance, _opts: Fasti
 
   // POST /v1/brief/today/select
   fastify.post('/v1/brief/today/select', {
-    schema: { 
-      tags: ['Brief'], 
-      summary: 'Select habit for today',
+    schema: {
+      tags: ['Brief'],
+      summary: 'Select a habit or task for today',
       body: {
         type: 'object',
-        required: ['habitId'],
         properties: {
           habitId: { type: 'string' },
-          date: { type: 'string' }
-        }
+          taskId: { type: 'string' },
+          date: { type: 'string' },
+        },
       },
-      response: { 
-        200: { type: 'object' }, 
-        400: { type: 'object' } 
-      } 
+      response: { 200: { type: 'object' }, 400: { type: 'object' } },
     },
-  }, async (req, reply) => {
+  }, async (req: any, reply) => {
     try {
       const userId = getUserIdOrThrow(req);
-      const { habitId, date } = req.body as { habitId: string; date?: string };
-      
-      // For now, just return success - this would need to be implemented in briefService
-      return { success: true, habitId, date };
+      const body = req.body as { habitId?: string; taskId?: string; date?: string };
+      if (!body.habitId && !body.taskId) {
+        return reply.code(400).send({ error: 'habitId or taskId is required' });
+      }
+      const res = await todayService.selectForToday(userId, body.habitId, body.taskId, body.date);
+      return res;
     } catch (e: any) {
       return reply.code(400).send({ error: e.message });
     }
@@ -81,29 +81,28 @@ export default async function briefRoutes(fastify: FastifyInstance, _opts: Fasti
 
   // POST /v1/brief/today/deselect
   fastify.post('/v1/brief/today/deselect', {
-    schema: { 
-      tags: ['Brief'], 
-      summary: 'Deselect habit for today',
+    schema: {
+      tags: ['Brief'],
+      summary: 'Deselect (remove) a habit or task from today',
       body: {
         type: 'object',
-        required: ['habitId'],
         properties: {
           habitId: { type: 'string' },
-          date: { type: 'string' }
-        }
+          taskId: { type: 'string' },
+          date: { type: 'string' },
+        },
       },
-      response: { 
-        200: { type: 'object' }, 
-        400: { type: 'object' } 
-      } 
+      response: { 200: { type: 'object' }, 400: { type: 'object' } },
     },
-  }, async (req, reply) => {
+  }, async (req: any, reply) => {
     try {
       const userId = getUserIdOrThrow(req);
-      const { habitId, date } = req.body as { habitId: string; date?: string };
-      
-      // For now, just return success - this would need to be implemented in briefService
-      return { success: true, habitId, date };
+      const body = req.body as { habitId?: string; taskId?: string; date?: string };
+      if (!body.habitId && !body.taskId) {
+        return reply.code(400).send({ error: 'habitId or taskId is required' });
+      }
+      const res = await todayService.deselectForToday(userId, body.habitId, body.taskId, body.date);
+      return res;
     } catch (e: any) {
       return reply.code(400).send({ error: e.message });
     }

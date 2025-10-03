@@ -339,7 +339,7 @@ class ApiClient {
 
   Future<Map<String, dynamic>> dismissAlarm(String alarmId) async {
     final response = await http.post(
-      Uri.parse('$baseUrl/v1/alarms/$alarmId/dismiss'),
+      Uri.parse('$baseUrl/v1/alarms/$alarmId/fire'),
       headers: _headers,
     );
     
