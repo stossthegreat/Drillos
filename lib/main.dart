@@ -24,7 +24,7 @@ void main() {
   
   // Override with production URL (this will be overridden by environment variable if provided)
   if (apiUrl.isEmpty) {
-  apiClient.setBaseUrl('https://drillsergeantai-production.up.railway.app');
+  apiClient.setBaseUrl('https://drillos-production.up.railway.app');
   } else {
     apiClient.setBaseUrl(apiUrl);
   }
