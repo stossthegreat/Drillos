@@ -19,7 +19,8 @@ import { eventsController } from './controllers/events.controller';
 import { nudgesController } from './controllers/nudges.controller';
 import briefController from './controllers/brief.controller';
 import { tasksController } from './controllers/tasks.controller';
-// import { voiceController } from './controllers/voice.controller'; // Temporarily disabled
+import voiceController from './controllers/voice.controller';
+import aiController from './controllers/ai.controller';
 import { userController } from './controllers/user.controller';
 
 // schedulers
@@ -229,7 +230,8 @@ const buildServer = () => {
   fastify.register(nudgesController);
   fastify.register(briefController);
   fastify.register(tasksController);
-  // fastify.register(voiceController); // Temporarily disabled due to method signature mismatch
+  fastify.register(voiceController);
+  fastify.register(aiController);
   fastify.register(userController);
 
   return fastify;
