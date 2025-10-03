@@ -44,7 +44,6 @@ export class HabitsService {
   async create(userId: string, input: CreateHabitInput) {
     const habit = await prisma.habit.create({
       data: {
-        userId,
         title: input.title,
         schedule: input.schedule ?? {},
         streak: 0,
