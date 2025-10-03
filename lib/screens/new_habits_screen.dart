@@ -672,10 +672,8 @@ class _NewHabitsScreenState extends State<NewHabitsScreen> with TickerProviderSt
           Row(
             children: [
               _buildActionButton('Calendar', Icons.calendar_today, () {
-                // TODO: Open calendar/scheduler modal
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Scheduler coming soon!')),
-                );
+                // Open edit modal to change schedule
+                _openEditModal(item);
               }),
               const SizedBox(width: 8),
               _buildActionButton('Stats', Icons.bar_chart, () {
