@@ -53,9 +53,12 @@ export default async function briefRoutes(fastify: FastifyInstance, _opts: Fasti
     try {
       const userId = getUserIdOrThrow(req);
       await ensureDemoUser(userId);
-      return await briefService.getTodaysBrief(userId);
+      const result = await briefService.getTodaysBrief(userId);
+      console.log('✅ Brief service returned:', JSON.stringify(result).substring(0, 200));
+      return result;
     } catch (e: any) {
-      return reply.code(400).send({ error: e.message });
+      console.error('❌ Brief error:', e);
+      return reply.code(400).send({ error: e.message || String(e) });
     }
   });
 
