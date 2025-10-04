@@ -34,10 +34,7 @@ jobs:
       - name: 📦 Install dependencies
         run: flutter pub get
 
-      - name: 🚫 Disable default test
-        run: |
-          mkdir -p test
-          echo "// default test disabled for CI" > test/widget_test.dart
+    
 
       - name: 🏗️ Build release APK
         run: flutter build apk --release
