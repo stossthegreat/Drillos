@@ -20,6 +20,10 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      # ⚠️ Skip tests (we don’t have any)
+      - name: Skip tests
+        run: echo "🟢 Skipping Flutter tests (no test files present)."
+
       - name: Build release APK
         run: flutter build apk --release
 
