@@ -3,7 +3,6 @@ import { habitsService } from "../services/habits.service";
 import { prisma } from "../utils/db";
 
 export async function habitsController(fastify: FastifyInstance) {
-  // ensure demo user exists
   async function ensureDemoUser(userId: string) {
     if (userId === "demo-user-123") {
       const exists = await prisma.user.findUnique({ where: { id: userId } });
@@ -22,24 +21,22 @@ export async function habitsController(fastify: FastifyInstance) {
     }
   }
 
-  // GET all habits
+  // GET habits
   fastify.get("/api/v1/habits", async (req, reply) => {
     const userId = (req as any).user?.id || req.headers["x-user-id"] || "demo-user-123";
     await ensureDemoUser(userId);
     return habitsService.list(userId);
   });
 
-  // CREATE new habit
+  // CREATE habit
   fastify.post("/api/v1/habits", async (req, reply) => {
     try {
       const userId = (req as any).user?.id || req.headers["x-user-id"] || "demo-user-123";
       await ensureDemoUser(userId);
       const habit = await habitsService.create(userId, req.body as any);
-      reply.code(201);
-      return habit;
+      reply.code(201).send(habit);
     } catch (e: any) {
-      reply.code(400);
-      return { error: e.message };
+      reply.code(400).send({ error: e.message });
     }
   });
 
@@ -49,8 +46,8 @@ export async function habitsController(fastify: FastifyInstance) {
     const id = req.params["id"];
     const date = (req.body as any)?.date;
     const idempotencyKey =
-      req.headers["idempotency-key"] ||
-      req.headers["Idempotency-Key"] ||
+      (req.headers["idempotency-key"] as string) ||
+      (req.headers["Idempotency-Key"] as string) ||
       undefined;
     return habitsService.tick({
       habitId: id,
@@ -65,6 +62,7 @@ export async function habitsController(fastify: FastifyInstance) {
     const userId = (req as any).user?.id || req.headers["x-user-id"] || "demo-user-123";
     const id = req.params["id"];
     await ensureDemoUser(userId);
-    return habitsService.delete(id, userId);
+    const result = await habitsService.delete(id, userId);
+    reply.send(result);
   });
 }
