@@ -13,13 +13,15 @@ export class TodayService {
       id: s.id,
       type: s.habitId ? "habit" : "task",
       title: s.habit?.title || s.task?.title,
-      completed: s.habit?.lastTick
-        ? new Date(s.habit.lastTick).toISOString().split("T")[0] === date
-        : s.task?.completed ?? false,
+      completed:
+        s.habitId && s.habit?.lastTick
+          ? new Date(s.habit.lastTick).toISOString().split("T")[0] === date
+          : s.task?.completed ?? false,
       color: s.habit?.color || "emerald",
       streak: s.habit?.streak || 0,
-      reminderEnabled: s.habit?.reminderEnabled || s.task?.reminderEnabled,
-      reminderTime: s.habit?.reminderTime || s.task?.reminderTime,
+      // Task doesn’t have reminder fields
+      reminderEnabled: s.habit?.reminderEnabled ?? false,
+      reminderTime: s.habit?.reminderTime ?? null,
     }));
   }
 
