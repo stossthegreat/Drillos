@@ -69,17 +69,17 @@ class _MentorSelectorState extends State<MentorSelector> with TickerProviderStat
                     shape: BoxShape.circle,
                     border: isSelected
                         ? Border.all(
-                                color: mentor.primaryColor.withValues(alpha: _glowAnimation.value),
+                                color: mentor.primaryColor.withOpacity(_glowAnimation.value),
                             width: 3,
                           )
                         : Border.all(
-                                color: Colors.grey.withValues(alpha: 0.3),
+                                color: Colors.grey.withOpacity(0.3),
                             width: 1,
                           ),
                     boxShadow: isSelected
                         ? [
                             BoxShadow(
-                                  color: mentor.primaryColor.withValues(alpha: _glowAnimation.value * 0.5),
+                                  color: mentor.primaryColor.withOpacity(_glowAnimation.value * 0.5),
                               blurRadius: 15,
                               spreadRadius: 2,
                             ),
@@ -116,7 +116,7 @@ class _MentorSelectorState extends State<MentorSelector> with TickerProviderStat
                               color: Colors.white,
                               shadows: [
                                 Shadow(
-                                        color: Colors.black.withValues(alpha: 0.5),
+                                        color: Colors.black.withOpacity(0.5),
                                   blurRadius: 2,
                                 ),
                               ],
