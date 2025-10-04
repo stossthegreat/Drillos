@@ -21,14 +21,15 @@ android {
         getByName("release") {
             isMinifyEnabled = true
             isShrinkResources = true
+            signingConfig = signingConfigs.getByName("debug")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = signingConfigs.getByName("debug")
         }
         getByName("debug") {
             isMinifyEnabled = false
+            isShrinkResources = false
         }
     }
 
@@ -45,12 +46,23 @@ android {
         resources {
             excludes += listOf(
                 "META-INF/LICENSE*",
-                "META-INF/NOTICE*"
+                "META-INF/NOTICE*",
+                "META-INF/AL2.0",
+                "META-INF/LGPL2.1"
             )
         }
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 }
 
 dependencies {
+    // Core Kotlin + AndroidX
     implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.24")
+    implementation("androidx.core:core-ktx:1.13.1")
+
+    // ✅ MultiDex Support
+    implementation("androidx.multidex:multidex:2.0.1")
 }
