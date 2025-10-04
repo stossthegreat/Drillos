@@ -4,7 +4,6 @@ pluginManagement {
         mavenCentral()
         gradlePluginPortal()
     }
-
     includeBuild("packages/flutter_tools/gradle")
 }
 
