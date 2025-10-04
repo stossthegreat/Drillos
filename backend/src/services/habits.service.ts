@@ -1,8 +1,14 @@
 import { prisma } from "../utils/db";
+import { todayService } from "./today.service";
 
 type CreateHabitInput = {
   title: string;
-  schedule: any;
+  schedule: {
+    type: "daily" | "weekdays" | "everyN" | "custom";
+    everyN?: number;
+    startDate?: string;
+    endDate?: string;
+  };
   color?: string | null;
   context?: any;
   reminderEnabled?: boolean;
@@ -12,8 +18,8 @@ type CreateHabitInput = {
 type TickInput = {
   habitId: string;
   userId: string;
-  dateISO?: string;        // optional YYYY-MM-DD
-  idempotencyKey?: string; // optional
+  dateISO?: string;
+  idempotencyKey?: string;
 };
 
 export class HabitsService {
@@ -22,53 +28,67 @@ export class HabitsService {
       where: { userId },
       orderBy: { createdAt: "asc" },
     });
-
-    const today = new Date().toDateString();
-
+    const todayKey = new Date().toISOString().split("T")[0];
     return habits.map((h) => ({
       ...h,
-      status:
-        h.lastTick && new Date(h.lastTick).toDateString() === today
-          ? "completed_today"
-          : "pending",
+      completedToday:
+        h.lastTick &&
+        new Date(h.lastTick).toISOString().split("T")[0] === todayKey,
     }));
   }
 
   async getById(id: string, userId: string) {
-    const habit = await prisma.habit.findFirst({
-      where: { id, userId },
-    });
-    return habit;
+    return prisma.habit.findFirst({ where: { id, userId } });
   }
 
   async create(userId: string, input: CreateHabitInput) {
     const habit = await prisma.habit.create({
       data: {
         title: input.title,
-        schedule: input.schedule ?? {},
+        schedule: input.schedule ?? { type: "daily" },
+        color: input.color ?? "emerald",
         streak: 0,
         lastTick: null,
-        color: input.color ?? 'emerald',
         context: input.context ?? {},
         reminderEnabled: input.reminderEnabled ?? false,
         reminderTime: input.reminderTime ?? null,
-        user: {
-          connect: { id: userId }
-        },
+        user: { connect: { id: userId } },
       },
     });
-    await this.logEvent(userId, "habit_created", { habitId: habit.id, title: habit.title });
+
+    await this.logEvent(userId, "habit_created", {
+      habitId: habit.id,
+      title: habit.title,
+    });
+
+    // Auto-select for today only if schedule matches
+    const shouldSelectToday = this.isScheduledToday(habit.schedule);
+    if (shouldSelectToday) {
+      try {
+        await todayService.selectForToday(userId, habit.id, undefined);
+      } catch (e) {
+        console.warn("⚠️ Auto-select skipped:", e);
+      }
+    }
+
     return habit;
   }
 
   async delete(id: string, userId: string) {
     const habit = await prisma.habit.findFirst({ where: { id, userId } });
-    if (!habit) {
-      return { ok: false, error: "Habit not found" };
-    }
-    await prisma.habit.delete({ where: { id } });
-    await this.logEvent(userId, "habit_deleted", { habitId: id, title: habit.title });
-    return { ok: true, deleted: { id, title: habit.title, streak: habit.streak } };
+    if (!habit) return { ok: false, error: "Habit not found" };
+
+    await prisma.$transaction([
+      prisma.todaySelection.deleteMany({ where: { userId, habitId: id } }),
+      prisma.habit.delete({ where: { id } }),
+    ]);
+
+    await this.logEvent(userId, "habit_deleted", {
+      habitId: id,
+      title: habit.title,
+    });
+
+    return { ok: true };
   }
 
   async tick({ habitId, userId, dateISO, idempotencyKey }: TickInput) {
@@ -78,71 +98,79 @@ export class HabitsService {
     const date = dateISO ? new Date(`${dateISO}T00:00:00Z`) : new Date();
     const dateKey = date.toISOString().split("T")[0];
 
-    // Check duplicate (idempotency)
     const existing = await prisma.event.findFirst({
       where: {
         userId,
         type: "habit_tick",
+        payload: { path: ["habitId"], equals: habitId } as any,
         ts: {
           gte: new Date(`${dateKey}T00:00:00.000Z`),
           lt: new Date(`${dateKey}T23:59:59.999Z`),
         },
-        payload: {
-          path: ["habitId"],
-          equals: habitId,
-        } as any,
       },
     });
+    if (existing) return { ok: true, idempotent: true };
 
-    if (existing) {
-      return {
-        ok: true,
-        idempotent: true,
-        message: "Already completed today",
-        streak: habit.streak,
-        timestamp: habit.lastTick,
-      };
-    }
-
-    // streak calc
     const lastTick = habit.lastTick ? new Date(habit.lastTick) : null;
-    const wasYesterday = lastTick && dayKey(lastTick) === dayKey(addDays(date, -1));
-    const nextStreak = !lastTick ? 1 : wasYesterday ? habit.streak + 1 : 1;
+    const wasYesterday =
+      lastTick && this.dayKey(lastTick) === this.dayKey(this.addDays(date, -1));
+    const newStreak = wasYesterday ? habit.streak + 1 : 1;
 
-    const updated = await prisma.habit.update({
+    await prisma.habit.update({
       where: { id: habitId },
-      data: { streak: nextStreak, lastTick: date },
+      data: { lastTick: date, streak: newStreak },
     });
 
     await this.logEvent(userId, "habit_tick", {
       habitId,
-      title: habit.title,
       date: dateKey,
-      nextStreak,
-      idempotencyKey: idempotencyKey ?? null,
+      newStreak,
+      idempotencyKey,
     });
 
-    return {
-      ok: true,
-      idempotent: false,
-      message: `Completed on ${dateKey}`,
-      streak: nextStreak,
-      timestamp: date.toISOString(),
-    };
+    return { ok: true, streak: newStreak, completedOn: dateKey };
   }
 
   private async logEvent(userId: string, type: string, payload: any) {
-    return prisma.event.create({
-      data: { userId, type, payload },
-    });
+    await prisma.event.create({ data: { userId, type, payload } });
+  }
+
+  private isScheduledToday(schedule: any): boolean {
+    if (!schedule || !schedule.type) return true;
+    const today = new Date();
+    const day = today.getDay(); // 0=Sun...6=Sat
+    const dateKey = today.toISOString().split("T")[0];
+
+    switch (schedule.type) {
+      case "daily":
+        return true;
+      case "weekdays":
+        return day >= 1 && day <= 5;
+      case "everyN":
+        if (!schedule.startDate || !schedule.everyN) return true;
+        const start = new Date(schedule.startDate);
+        const diff =
+          Math.floor(
+            (today.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)
+          ) % schedule.everyN;
+        return diff === 0;
+      case "custom":
+        if (schedule.startDate && today < new Date(schedule.startDate)) return false;
+        if (schedule.endDate && today > new Date(schedule.endDate)) return false;
+        return true;
+      default:
+        return true;
+    }
+  }
+
+  private dayKey(d: Date) {
+    return d.toISOString().split("T")[0];
+  }
+  private addDays(d: Date, n: number) {
+    const x = new Date(d);
+    x.setUTCDate(x.getUTCDate() + n);
+    return x;
   }
 }
 
-function dayKey(d: Date) {
-  return d.toISOString().split("T")[0];
-}
-function addDays(d: Date, n: number) {
-  const x = new Date(d);
-  x.setUTCDate(x.getUTCDate() + n);
-  return x;
-}
+export const habitsService = new HabitsService();
