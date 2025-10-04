@@ -1,5 +1,5 @@
 name: drillos
-description: "Drill OS — the active habit operating system."
+description: "Drill OS — The active habit operating system."
 publish_to: "none"
 
 version: 1.0.0+1
@@ -11,34 +11,25 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # Core
+  # Core UI + routing
   cupertino_icons: ^1.0.8
   go_router: ^13.2.0
   google_fonts: ^6.2.1
   http: ^1.2.0
   shared_preferences: ^2.2.2
 
-  # Audio playback (voice, nudges, mentor audio)
+  # Audio for mentors & nudges
   audioplayers: ^5.2.1
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-
-  # Use compatible lints for Dart 3.4.x (fixes your CI build)
-  flutter_lints: ^4.0.0
+  flutter_lints: ^4.0.0  # ✅ compatible with Dart 3.4.3
 
 flutter:
   uses-material-design: true
 
-  # Assets required for Drill OS visuals + sounds
   assets:
     - assets/audio/
     - assets/images/
     - assets/avatars/
-
-  # Optional: custom fonts (keep empty for now)
-  # fonts:
-  #   - family: DrillosFont
-  #     fonts:
-  #       - asset: assets/fonts/DrillosFont-Regular.ttf
