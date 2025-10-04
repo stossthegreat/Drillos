@@ -1,131 +1,70 @@
 import { FastifyInstance } from "fastify";
-import { HabitsService } from "../services/habits.service";
+import { habitsService } from "../services/habits.service";
 import { prisma } from "../utils/db";
 
 export async function habitsController(fastify: FastifyInstance) {
-  const service = new HabitsService();
-
-  // Helper to ensure demo user exists before operations
+  // ensure demo user exists
   async function ensureDemoUser(userId: string) {
     if (userId === "demo-user-123") {
-      const existingUser = await prisma.user.findUnique({ where: { id: userId } });
-      if (!existingUser) {
+      const exists = await prisma.user.findUnique({ where: { id: userId } });
+      if (!exists) {
         await prisma.user.create({
           data: {
             id: userId,
             email: "demo@drillsergeant.com",
-            tz: "Europe/London",
+            mentorId: "marcus",
             tone: "balanced",
             intensity: 2,
-            consentRoast: false,
             plan: "FREE",
-            mentorId: "marcus",
-            nudgesEnabled: true,
-            briefsEnabled: true,
-            debriefsEnabled: true,
           },
         });
-        console.log("✅ Created demo user:", userId);
       }
     }
   }
 
-  // List habits (with "completed today" status)
+  // GET all habits
   fastify.get("/api/v1/habits", async (req, reply) => {
-    const userId = (req as any).user?.id || req.headers['x-user-id'] || "demo-user-123";
+    const userId = (req as any).user?.id || req.headers["x-user-id"] || "demo-user-123";
     await ensureDemoUser(userId);
-    const habits = await service.list(userId);
-    return habits;
+    return habitsService.list(userId);
   });
 
-  // Create habit
+  // CREATE new habit
   fastify.post("/api/v1/habits", async (req, reply) => {
     try {
-      const userId = (req as any).user?.id || req.headers['x-user-id'] || "demo-user-123";
+      const userId = (req as any).user?.id || req.headers["x-user-id"] || "demo-user-123";
       await ensureDemoUser(userId);
-      const body = req.body as any;
-
-      const habit = await service.create(userId, {
-        title: body.title ?? body.name,
-        schedule: body.schedule ?? scheduleFromForm(body),
-        color: body.color ?? null,
-        context: {
-          difficulty: body.difficulty ?? body.intensity ?? 2,
-          category: body.category ?? "general",
-          lifeDays: 0,
-        },
-        reminderEnabled: body.reminderEnabled ?? body.reminderOn ?? false,
-        reminderTime: body.reminderTime ?? "08:00",
-      });
-
-      // Auto-select the new habit for today's brief
-      try {
-        console.log('🔄 Auto-selecting habit for today:', habit.id);
-        const { todayService } = await import('../services/today.service');
-        const result = await todayService.selectForToday(userId, habit.id, undefined);
-        console.log('✅ Auto-selected habit result:', result);
-      } catch (e) {
-        console.error('❌ Failed to auto-select habit for today:', e);
-      }
-
+      const habit = await habitsService.create(userId, req.body as any);
       reply.code(201);
       return habit;
     } catch (e: any) {
-      console.error('❌ Error creating habit:', e);
       reply.code(400);
       return { error: e.message };
     }
   });
 
-  // Tick habit (idempotent per date)
-  fastify.post<{
-    Params: { id: string };
-    Body: { date?: string };
-    Headers: { "idempotency-key"?: string } & Record<string, string>;
-  }>("/api/v1/habits/:id/tick", async (req, reply) => {
-    const userId = (req as any).user?.id || req.headers['x-user-id'] || "demo-user-123";
-    const id = req.params.id;
-    const body = req.body || {};
-    const dateStr = (body as any).date; // optional ISO YYYY-MM-DD
-    const idempotencyKey = (req.headers["idempotency-key"] ||
+  // TICK habit
+  fastify.post("/api/v1/habits/:id/tick", async (req, reply) => {
+    const userId = (req as any).user?.id || req.headers["x-user-id"] || "demo-user-123";
+    const id = req.params["id"];
+    const date = (req.body as any)?.date;
+    const idempotencyKey =
+      req.headers["idempotency-key"] ||
       req.headers["Idempotency-Key"] ||
-      req.headers["IDEMPOTENCY-KEY"]) as string | undefined;
-
-    const res = await service.tick({
+      undefined;
+    return habitsService.tick({
       habitId: id,
       userId,
-      dateISO: dateStr,
+      dateISO: date,
       idempotencyKey,
     });
-
-    return res;
   });
 
-  // Delete habit
-  fastify.delete<{
-    Params: { id: string };
-  }>("/api/v1/habits/:id", async (req, reply) => {
-    try {
-      const userId = (req as any).user?.id || req.headers['x-user-id'] || "demo-user-123";
-      await ensureDemoUser(userId);
-      const id = req.params.id;
-      const res = await service.delete(id, userId);
-      reply.code(200);
-      return res;
-    } catch (e: any) {
-      reply.code(400);
-      return { error: e.message };
-    }
+  // DELETE habit
+  fastify.delete("/api/v1/habits/:id", async (req, reply) => {
+    const userId = (req as any).user?.id || req.headers["x-user-id"] || "demo-user-123";
+    const id = req.params["id"];
+    await ensureDemoUser(userId);
+    return habitsService.delete(id, userId);
   });
-}
-
-// helpers
-function scheduleFromForm(body: any) {
-  // Accepts the UI format you already use
-  // e.g. frequency: 'daily' | 'weekdays' | 'everyN', everyN: number, startDate/endDate
-  const schedule: any = { type: body.frequency ?? "daily" };
-  if (schedule.type === "everyN" && body.everyN) schedule.everyN = Number(body.everyN);
-  if (body.startDate) schedule.startDate = body.startDate;
-  if (body.endDate) schedule.endDate = body.endDate;
-  return schedule;
 }
