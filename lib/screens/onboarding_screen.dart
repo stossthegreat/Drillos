@@ -117,13 +117,18 @@ class _DrillOSOnboardingState extends State<DrillOSOnboarding> with SingleTicker
   }
 
   void _next() {
-    if (_canProceed() && _stepIndex < 7) {
-      setState(() {
-        _stepIndex++;
-        _animationController.reset();
-        _animationController.forward();
-      });
-      _saveState();
+    if (_canProceed()) {
+      if (_stepIndex < 7) {
+        setState(() {
+          _stepIndex++;
+          _animationController.reset();
+          _animationController.forward();
+        });
+        _saveState();
+      } else if (_stepIndex == 7) {
+        // Final step - complete onboarding
+        widget.onComplete?.call();
+      }
     }
   }
 
@@ -429,9 +434,9 @@ class _DrillOSOnboardingState extends State<DrillOSOnboarding> with SingleTicker
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text('Next', style: TextStyle(fontWeight: FontWeight.w600)),
+                Text(_stepIndex == 7 ? 'Complete' : 'Next', style: TextStyle(fontWeight: FontWeight.w600)),
                 SizedBox(width: 4),
-                Icon(Icons.chevron_right, size: 16),
+                Icon(_stepIndex == 7 ? Icons.check : Icons.chevron_right, size: 16),
               ],
             ),
           ),
@@ -1405,7 +1410,10 @@ class _PaywallStepState extends State<_PaywallStep> {
                         children: [
                           Expanded(
                             child: ElevatedButton(
-                              onPressed: () {},
+                              onPressed: () {
+                                // TODO: Implement actual payment processing
+                                widget.onComplete?.call();
+                              },
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: Color(0xFF10B981),
                                 foregroundColor: Colors.black,
