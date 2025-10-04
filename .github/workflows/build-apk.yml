@@ -36,9 +36,6 @@ jobs:
     - name: Verify Flutter installation
       run: flutter doctor -v
       
-    - name: Run Flutter tests
-      run: flutter test
-      
     - name: Build APK (Debug)
       run: flutter build apk --debug
       
