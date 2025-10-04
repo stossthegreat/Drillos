@@ -3,7 +3,7 @@ import { todayService } from "./today.service";
 
 type CreateHabitInput = {
   title: string;
-  schedule: {
+  schedule?: {
     type: "daily" | "weekdays" | "everyN" | "custom";
     everyN?: number;
     startDate?: string;
@@ -28,6 +28,7 @@ export class HabitsService {
       where: { userId },
       orderBy: { createdAt: "asc" },
     });
+
     const todayKey = new Date().toISOString().split("T")[0];
     return habits.map((h) => ({
       ...h,
@@ -51,7 +52,7 @@ export class HabitsService {
         lastTick: null,
         context: input.context ?? {},
         reminderEnabled: input.reminderEnabled ?? false,
-        reminderTime: input.reminderTime ?? null,
+        reminderTime: input.reminderTime ?? "08:00",
         user: { connect: { id: userId } },
       },
     });
@@ -61,11 +62,15 @@ export class HabitsService {
       title: habit.title,
     });
 
-    // Auto-select for today only if schedule matches
-    const shouldSelectToday = this.isScheduledToday(habit.schedule);
-    if (shouldSelectToday) {
+    // Auto-select if today matches the schedule, but don’t double-add
+    if (this.isScheduledToday(habit.schedule)) {
       try {
-        await todayService.selectForToday(userId, habit.id, undefined);
+        const existing = await prisma.todaySelection.findFirst({
+          where: { userId, habitId: habit.id, date: this.dayKey(new Date()) },
+        });
+        if (!existing) {
+          await todayService.selectForToday(userId, habit.id, undefined);
+        }
       } catch (e) {
         console.warn("⚠️ Auto-select skipped:", e);
       }
@@ -98,15 +103,13 @@ export class HabitsService {
     const date = dateISO ? new Date(`${dateISO}T00:00:00Z`) : new Date();
     const dateKey = date.toISOString().split("T")[0];
 
+    // prevent duplicates
     const existing = await prisma.event.findFirst({
       where: {
         userId,
         type: "habit_tick",
         payload: { path: ["habitId"], equals: habitId } as any,
-        ts: {
-          gte: new Date(`${dateKey}T00:00:00.000Z`),
-          lt: new Date(`${dateKey}T23:59:59.999Z`),
-        },
+        ts: { gte: new Date(`${dateKey}T00:00:00Z`), lt: new Date(`${dateKey}T23:59:59Z`) },
       },
     });
     if (existing) return { ok: true, idempotent: true };
@@ -138,8 +141,7 @@ export class HabitsService {
   private isScheduledToday(schedule: any): boolean {
     if (!schedule || !schedule.type) return true;
     const today = new Date();
-    const day = today.getDay(); // 0=Sun...6=Sat
-    const dateKey = today.toISOString().split("T")[0];
+    const day = today.getDay();
 
     switch (schedule.type) {
       case "daily":
@@ -149,11 +151,10 @@ export class HabitsService {
       case "everyN":
         if (!schedule.startDate || !schedule.everyN) return true;
         const start = new Date(schedule.startDate);
-        const diff =
-          Math.floor(
-            (today.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)
-          ) % schedule.everyN;
-        return diff === 0;
+        const diffDays = Math.floor(
+          (today.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)
+        );
+        return diffDays % schedule.everyN === 0;
       case "custom":
         if (schedule.startDate && today < new Date(schedule.startDate)) return false;
         if (schedule.endDate && today > new Date(schedule.endDate)) return false;
