@@ -17,10 +17,11 @@ allprojects {
     }
 }
 
-rootProject.buildDir = "../build"
+// ✅ Fix: wrap String paths in `file(...)`
+rootProject.buildDir = file("../build")
 
 subprojects {
-    project.buildDir = "${rootProject.buildDir}/${project.name}"
+    project.buildDir = file("${rootProject.buildDir}/${project.name}")
 }
 
 tasks.register<Delete>("clean") {
