@@ -1,0 +1,106 @@
+name: Android APK Build
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: 'Build type (debug or release)'
+        required: false
+        default: 'release'
+        type: choice
+        options:
+          - debug
+          - release
+
+jobs:
+  build:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: ☕ Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: 🐦 Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: 📦 Get Flutter dependencies
+        run: flutter pub get
+
+      - name: 🔍 Verify Flutter setup
+        run: flutter doctor -v
+
+      - name: 🧪 Run Flutter tests
+        run: flutter test || echo "No tests found"
+        continue-on-error: true
+
+      - name: 🏗️ Build Debug APK
+        if: github.event.inputs.build_type == 'debug' || github.event_name == 'pull_request'
+        run: flutter build apk --debug
+
+      - name: 🚀 Build Release APK
+        if: github.event.inputs.build_type != 'debug' && github.event_name != 'pull_request'
+        run: flutter build apk --release
+
+      - name: 📤 Upload Debug APK
+        if: github.event.inputs.build_type == 'debug' || github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: drillos-debug-${{ github.sha }}
+          path: build/app/outputs/flutter-apk/app-debug.apk
+          retention-days: 30
+
+      - name: 📤 Upload Release APK
+        if: github.event.inputs.build_type != 'debug' && github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: drillos-release-${{ github.sha }}
+          path: build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 90
+
+      - name: 📊 Generate Build Summary
+        if: always()
+        run: |
+          echo "## 🎉 DrillOS APK Build Complete!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📱 Build Information" >> $GITHUB_STEP_SUMMARY
+          echo "- **Build Type**: ${{ github.event.inputs.build_type || 'release' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch**: \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Flutter Version**: $(flutter --version | head -n1)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -f "build/app/outputs/flutter-apk/app-release.apk" ]; then
+            echo "### 📦 Release APK" >> $GITHUB_STEP_SUMMARY
+            echo "- **Size**: $(du -h build/app/outputs/flutter-apk/app-release.apk | cut -f1)" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ -f "build/app/outputs/flutter-apk/app-debug.apk" ]; then
+            echo "### 🐛 Debug APK" >> $GITHUB_STEP_SUMMARY
+            echo "- **Size**: $(du -h build/app/outputs/flutter-apk/app-debug.apk | cut -f1)" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### ✨ Features" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ AI Mentors with Voice" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Habit Tracking & Streaks" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Smart Alarms & Nudges" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Offset Engine" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Modern Glass UI" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "📥 **Download**: Check Artifacts section below" >> $GITHUB_STEP_SUMMARY

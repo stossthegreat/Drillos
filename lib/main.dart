@@ -46,7 +46,7 @@ class DrillSergeantApp extends StatelessWidget {
         GoRoute(path: '/onboarding', builder: (c, s) => DrillOSOnboarding(
           onComplete: () {
             // Navigate to home screen when onboarding is complete
-            context.go('/home');
+            c.go('/home');
           },
         )),
         ShellRoute(

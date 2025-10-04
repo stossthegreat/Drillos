@@ -1,9 +1,15 @@
+plugins {
+    id("com.android.application")
+    id("kotlin-android")
+    id("dev.flutter.flutter-gradle-plugin")
+}
+
 android {
-    namespace = "com.drillos.app"
-    compileSdk = 36 // ⚠️ Upgrade to satisfy path_provider & shared_preferences
+    namespace = "com.example.drillos"
+    compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.drillos.app"
+        applicationId = "com.example.drillos"
         minSdk = 23
         targetSdk = 36
         versionCode = 1
@@ -19,7 +25,6 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            // ✅ FIX: Keep Flutter & Play Core classes
             proguardFiles("proguard-flutter.txt")
             signingConfig = signingConfigs.getByName("debug")
         }
@@ -28,12 +33,20 @@ android {
         }
     }
 
-    // ✅ Kotlin/Java configs unchanged
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+
     kotlinOptions {
         jvmTarget = "17"
     }
+}
+
+dependencies {
+    implementation("androidx.multidex:multidex:2.0.1")
+}
+
+flutter {
+    source = "../.."
 }
