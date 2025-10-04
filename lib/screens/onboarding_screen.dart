@@ -1,753 +1,438 @@
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
+import 'package:flutter/services.dart';
+import 'dart:ui';
+import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:math' as math;
 
-class OnboardingScreen extends StatefulWidget {
-  const OnboardingScreen({super.key});
+/// Drill OS — Onboarding + Paywall (Flutter)
+/// "10x Masterpiece" Edition
+/// 
+/// Complete Flutter port of the React onboarding with:
+/// - Polished visual system (glass, gradient orbs, subtle grid)
+/// - Step rail with progress bar + keyboard navigation
+/// - Guarded steps (mentor required, 3–6 habits, at least one schedule block)
+/// - Micro-sim "Offset Engine" demo (good vs bad → live net score)
+/// - Local storage state persistence (resume where you left)
+/// - Paywall with Monthly/Yearly toggle + comparison + social proof
+/// - Smooth transitions and animations
+
+class DrillOSOnboarding extends StatefulWidget {
+  final VoidCallback? onComplete;
+  final VoidCallback? onLogin;
+
+  const DrillOSOnboarding({
+    Key? key,
+    this.onComplete,
+    this.onLogin,
+  }) : super(key: key);
 
   @override
-  State<OnboardingScreen> createState() => _OnboardingScreenState();
+  State<DrillOSOnboarding> createState() => _DrillOSOnboardingState();
 }
 
-class _OnboardingScreenState extends State<OnboardingScreen>
-    with TickerProviderStateMixin {
-  int stepIndex = 0;
-  String? selectedMentor;
-  final Set<String> selectedHabits = {};
-  bool morning = true, midday = true, evening = true;
-  bool notificationsEnabled = false;
-  double badScore = 0.0;
-  String billing = 'monthly';
+class _DrillOSOnboardingState extends State<DrillOSOnboarding> with SingleTickerProviderStateMixin {
+  int _stepIndex = 0;
+  String? _selectedMentor;
+  Set<String> _selectedHabits = {};
+  Map<String, bool> _schedule = {
+    'morning': true,
+    'midday': true,
+    'evening': true,
+  };
+  bool _notificationsEnabled = false;
+  
+  late AnimationController _animationController;
+  late Animation<double> _fadeAnimation;
+  late Animation<Offset> _slideAnimation;
 
-  late final AnimationController _orbController;
-  late final AnimationController _fadeController;
-  late final List<_OrbData> _orbs;
+  final List<Mentor> _mentors = [
+    Mentor(id: 'drill', name: 'Drill Sergeant', tone: 'Aggressive • No excuses', gradient: [Color(0xFF10B981), Color(0xFF047857)]),
+    Mentor(id: 'marcus', name: 'Marcus Aurelius', tone: 'Stoic • Calm Authority', gradient: [Color(0xFF84CC16), Color(0xFF047857)]),
+    Mentor(id: 'confucius', name: 'Confucius', tone: 'Order • Discipline', gradient: [Color(0xFF6EE7B7), Color(0xFF047857)]),
+    Mentor(id: 'buddha', name: 'Buddha', tone: 'Compassion • Presence', gradient: [Color(0xFF5EEAD4), Color(0xFF047857)]),
+    Mentor(id: 'abraham_lincoln', name: 'Abraham Lincoln', tone: 'Moral • Resolute', gradient: [Color(0xFF6EE7B7), Color(0xFF475569)]),
+  ];
 
-  final List<_StepSpec> steps = [];
-
-  static const List<List<dynamic>> _starterHabits = [
-    ['water', 'Drink 2L Water', 0.20],
-    ['steps', '8k Steps', 0.20],
-    ['sleep', 'Sleep by 11pm', 0.25],
-    ['focus', '45m Deep Work', 0.25],
-    ['gym', 'Workout', 0.30],
-    ['reading', 'Read 10 pages', 0.15],
+  final List<StarterHabit> _starterHabits = [
+    StarterHabit(id: 'water', label: 'Drink 2L Water', weight: 0.2, icon: Icons.water_drop),
+    StarterHabit(id: 'steps', label: '8k Steps', weight: 0.2, icon: Icons.directions_walk),
+    StarterHabit(id: 'sleep', label: 'Sleep by 11pm', weight: 0.25, icon: Icons.bedtime),
+    StarterHabit(id: 'focus', label: '45m Deep Work', weight: 0.25, icon: Icons.track_changes),
+    StarterHabit(id: 'gym', label: 'Workout', weight: 0.3, icon: Icons.fitness_center),
+    StarterHabit(id: 'reading', label: 'Read 10 pages', weight: 0.15, icon: Icons.book),
   ];
 
   @override
   void initState() {
     super.initState();
-    _orbController = AnimationController(
+    _animationController = AnimationController(
       vsync: this,
-      duration: const Duration(seconds: 20),
-    )..repeat();
-    
-    _fadeController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 300),
+      duration: Duration(milliseconds: 250),
     );
-
-    _generateOrbs();
-    // Don't build steps here - they need context from build()
-    _loadPersisted();
-    _fadeController.forward();
+    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _animationController, curve: Curves.easeOut),
+    );
+    _slideAnimation = Tween<Offset>(begin: Offset(0, 0.03), end: Offset.zero).animate(
+      CurvedAnimation(parent: _animationController, curve: Curves.easeOut),
+    );
+    _animationController.forward();
+    _loadState();
   }
 
   @override
   void dispose() {
-    _orbController.dispose();
-    _fadeController.dispose();
+    _animationController.dispose();
     super.dispose();
   }
 
-  void _generateOrbs() {
-    final random = math.Random(42); // Fixed seed for consistent layout
-    _orbs = List.generate(6, (i) {
-      return _OrbData(
-        x: random.nextDouble(),
-        y: random.nextDouble(),
-        size: 100 + random.nextDouble() * 200,
-        speed: 0.3 + random.nextDouble() * 0.7,
-        color: [
-          const Color(0xFF10B981).withOpacity(0.1),
-          const Color(0xFF3B82F6).withOpacity(0.08),
-          const Color(0xFF8B5CF6).withOpacity(0.06),
-          const Color(0xFFF59E0B).withOpacity(0.05),
-        ][i % 4],
-      );
-    });
+  Future<void> _loadState() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getString('drillos_onboarding');
+    if (saved != null) {
+      try {
+        final data = jsonDecode(saved);
+        setState(() {
+          _stepIndex = data['stepIndex'] ?? 0;
+          _selectedMentor = data['selectedMentor'];
+          _selectedHabits = Set<String>.from(data['selectedHabits'] ?? []);
+          _schedule = Map<String, bool>.from(data['schedule'] ?? _schedule);
+          _notificationsEnabled = data['notificationsEnabled'] ?? false;
+        });
+      } catch (e) {
+        print('Error loading onboarding state: $e');
+      }
+    }
   }
 
-  void _buildSteps() {
-    steps.clear();
-    steps.addAll([
-      _StepSpec(
-        id: 'welcome',
-        title: 'Welcome to Drill OS',
-        subtitle: 'The first active Habit OS — alive, not passive.',
-        body: _buildWelcome(),
-      ),
-      _StepSpec(
-        id: 'account',
-        title: 'Create Account',
-        subtitle: 'Sign in to sync your progress across devices.',
-        body: _buildAccount(),
-      ),
-      _StepSpec(
-        id: 'mentor',
-        title: 'Choose Your Mentor',
-        subtitle: 'Pick a voice to guide (or push) you.',
-        body: _buildMentorChoice(),
-      ),
-      _StepSpec(
-        id: 'habits',
-        title: 'Build Your Stack',
-        subtitle: 'Select 3–6 core habits. You can edit later.',
-        body: _buildHabitsChoice(),
-      ),
-      _StepSpec(
-        id: 'schedule',
-        title: 'Set Your Cadence',
-        subtitle: 'When should we nudge you?',
-        body: _buildSchedule(),
-      ),
-      _StepSpec(
-        id: 'engine',
-        title: 'How We Judge Days',
-        subtitle: 'Offset Engine preview: good vs bad → net score.',
-        body: _buildOffsetEngine(),
-      ),
-      _StepSpec(
-        id: 'permissions',
-        title: 'Stay On Track',
-        subtitle: 'Enable notifications so your mentor can reach you.',
-        body: _buildPermissions(),
-      ),
-      _StepSpec(
-        id: 'paywall',
-        title: 'Unlock Drill OS',
-        subtitle: 'Go Free or power up with Pro.',
-        body: _buildPaywall(),
-      ),
-    ]);
-  }
-
-  bool get canProceed {
-    final id = steps[stepIndex].id;
-    if (id == 'mentor') return selectedMentor != null;
-    if (id == 'habits') return selectedHabits.length >= 3 && selectedHabits.length <= 6;
-    if (id == 'schedule') return morning || midday || evening;
-    return true;
+  Future<void> _saveState() async {
+    final prefs = await SharedPreferences.getInstance();
+    final data = {
+      'stepIndex': _stepIndex,
+      'selectedMentor': _selectedMentor,
+      'selectedHabits': _selectedHabits.toList(),
+      'schedule': _schedule,
+      'notificationsEnabled': _notificationsEnabled,
+    };
+    await prefs.setString('drillos_onboarding', jsonEncode(data));
   }
 
   void _next() {
-    if (!canProceed) return;
-    if (stepIndex < steps.length - 1) {
-      setState(() => stepIndex++);
-      _persist();
-    } else {
-      _complete();
+    if (_canProceed() && _stepIndex < 7) {
+      setState(() {
+        _stepIndex++;
+        _animationController.reset();
+        _animationController.forward();
+      });
+      _saveState();
     }
   }
 
   void _prev() {
-    if (stepIndex > 0) {
-      setState(() => stepIndex--);
-      _persist();
+    if (_stepIndex > 0) {
+      setState(() {
+        _stepIndex--;
+        _animationController.reset();
+        _animationController.forward();
+      });
+      _saveState();
     }
   }
 
-  Future<void> _complete() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('onboarding_done', true);
-    await prefs.remove('onboarding_state');
-    if (mounted) context.go('/home');
+  bool _canProceed() {
+    switch (_stepIndex) {
+      case 2: // mentor step
+        return _selectedMentor != null;
+      case 3: // habits step
+        return _selectedHabits.length >= 3 && _selectedHabits.length <= 6;
+      case 4: // schedule step
+        return _schedule.values.any((v) => v);
+      default:
+        return true;
+    }
   }
 
-  Future<void> _loadPersisted() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final json = prefs.getString('onboarding_state');
-      if (json != null && json.isNotEmpty) {
-        final map = _decodeJson(json);
-        setState(() {
-          stepIndex = (map['stepIndex'] ?? stepIndex) is int ? map['stepIndex'] : stepIndex;
-          selectedMentor = (map['selectedMentor'] ?? selectedMentor) as String?;
-          final List<dynamic> saved = (map['selectedHabits'] ?? []) as List<dynamic>;
-          selectedHabits
-            ..clear()
-            ..addAll(saved.map((e) => e.toString()));
-          final sched = map['schedule'] as Map<String, dynamic>?;
-          if (sched != null) {
-            morning = sched['morning'] == true;
-            midday = sched['midday'] == true;
-            evening = sched['evening'] == true;
-          }
-          notificationsEnabled = map['notificationsEnabled'] == true;
-          badScore = (map['badScore'] is num) ? (map['badScore'] as num).toDouble() : badScore;
-          billing = (map['billing'] is String) ? map['billing'] as String : billing;
-        });
-        _buildSteps();
-      }
-    } catch (_) {}
+  String _getStepTitle() {
+    switch (_stepIndex) {
+      case 0: return 'Welcome to Drill OS';
+      case 1: return 'Create Account';
+      case 2: return 'Choose Your Mentor';
+      case 3: return 'Build Your Stack';
+      case 4: return 'Set Your Cadence';
+      case 5: return 'How We Judge Days';
+      case 6: return 'Stay On Track';
+      case 7: return 'Unlock Drill OS';
+      default: return '';
+    }
   }
 
-  void _persist() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final map = {
-        'stepIndex': stepIndex,
-        'selectedMentor': selectedMentor,
-        'selectedHabits': selectedHabits.toList(),
-        'schedule': {'morning': morning, 'midday': midday, 'evening': evening},
-        'notificationsEnabled': notificationsEnabled,
-        'badScore': badScore,
-        'billing': billing,
-      };
-      await prefs.setString('onboarding_state', _encodeJson(map));
-    } catch (_) {}
+  String _getStepSubtitle() {
+    switch (_stepIndex) {
+      case 0: return 'The first active Habit OS — alive, not passive.';
+      case 1: return 'Sign in to sync your progress across devices.';
+      case 2: return 'Pick a voice to guide (or push) you.';
+      case 3: return 'Select 3–6 core habits. You can edit later.';
+      case 4: return 'When should we nudge you?';
+      case 5: return 'Offset Engine preview: good vs bad → net score.';
+      case 6: return 'Enable notifications so your mentor can reach you.';
+      case 7: return 'Go Free or power up with Pro.';
+      default: return '';
+    }
   }
 
-  Widget _buildWelcome() {
-    return Column(
-      children: [
-        // Hero Card with Mentor Avatars
-        _HeroCard(),
-        const SizedBox(height: 24),
-        _GlassCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Active Habit Operating System',
-                style: TextStyle(fontSize: 16, color: Colors.white70, fontWeight: FontWeight.w500),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'A council of mentors that remembers, adapts, and pushes you daily.',
-                style: TextStyle(color: Colors.white60, height: 1.4),
-              ),
-              const SizedBox(height: 16),
-              Wrap(spacing: 8, runSpacing: 8, children: const [
-                _Badge('Mentor Voices'),
-                _Badge('Strictness Levels'),
-                _Badge('Weekly Reports'),
-              ]),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildAccount() {
-    return _GlassCard(
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Text(
-          'Sign in to sync your data and keep your streaks safe.',
-          style: TextStyle(color: Colors.white70, height: 1.4),
-        ),
-        const SizedBox(height: 16),
-        Row(children: [
-          Expanded(
-            child: _GlassButton(
-              label: 'Continue with Email',
-              onTap: () { _next(); _persist(); },
-              primary: true,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: _GlassButton(
-              label: 'Guest Mode',
-              onTap: () { _next(); _persist(); },
-            ),
-          ),
-        ]),
-        const SizedBox(height: 12),
-        const Text(
-          'You can link your account later in settings.',
-          style: const TextStyle(fontSize: 12, color: Color(0x66FFFFFF)),
-        ),
-      ]),
-    );
-  }
-
-  Widget _buildMentorChoice() {
-    const mentorList = [
-      ['drill', 'Drill Sergeant', 'Aggressive • No excuses', '🎖️'],
-      ['marcus', 'Marcus Aurelius', 'Stoic • Calm Authority', '🏛️'],
-      ['confucius', 'Confucius', 'Order • Discipline', '📚'],
-      ['buddha', 'Buddha', 'Compassion • Presence', '🧘'],
-      ['lincoln', 'Abraham Lincoln', 'Moral • Resolute', '🎩'],
-    ];
-    
-    return GridView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        crossAxisSpacing: 12,
-        mainAxisSpacing: 12,
-        childAspectRatio: 1.2,
-      ),
-      itemCount: mentorList.length,
-      itemBuilder: (context, index) {
-        final m = mentorList[index];
-        final active = selectedMentor == m[0];
-        return _MentorCard(
-          active: active,
-          emoji: m[3],
-          title: m[1],
-          subtitle: m[2],
-          onTap: () => setState(() {
-            selectedMentor = m[0];
-            _persist();
-          }),
-        );
-      },
-    );
-  }
-
-  Widget _buildHabitsChoice() {
-    return GridView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        crossAxisSpacing: 12,
-        mainAxisSpacing: 12,
-        childAspectRatio: 1.8,
-      ),
-      itemCount: _starterHabits.length,
-      itemBuilder: (context, index) {
-        final h = _starterHabits[index];
-        final id = h[0] as String;
-        final label = h[1] as String;
-        final active = selectedHabits.contains(id);
-        return _HabitCard(
-          active: active,
-          title: label,
-          weight: (h[2] as num).toDouble(),
-          onTap: () => setState(() {
-            if (active) {
-              selectedHabits.remove(id);
-            } else {
-              selectedHabits.add(id);
-            }
-            _persist();
-          }),
-        );
-      },
-    );
-  }
-
-  Widget _buildSchedule() {
-    return Row(children: [
-      Expanded(
-        child: _ScheduleCard(
-          active: morning,
-          title: 'Morning',
-          subtitle: 'Primer & plan',
-          icon: '🌅',
-          onTap: () => setState(() { morning = !morning; _persist(); }),
-        ),
-      ),
-      const SizedBox(width: 12),
-      Expanded(
-        child: _ScheduleCard(
-          active: midday,
-          title: 'Midday',
-          subtitle: 'Adaptive nudge',
-          icon: '☀️',
-          onTap: () => setState(() { midday = !midday; _persist(); }),
-        ),
-      ),
-      const SizedBox(width: 12),
-      Expanded(
-        child: _ScheduleCard(
-          active: evening,
-          title: 'Evening',
-          subtitle: 'Reflection',
-          icon: '🌙',
-          onTap: () => setState(() { evening = !evening; _persist(); }),
-        ),
-      ),
-    ]);
-  }
-
-  Widget _buildOffsetEngine() {
-    final good = _computeGoodScore();
-    final net = (good - badScore).clamp(-1.0, 1.0);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Container(
+        width: double.infinity,
+        height: double.infinity,
+        decoration: BoxDecoration(color: Colors.black),
+        child: Stack(
           children: [
-            Expanded(
-              child: _MetricCard(
-                title: 'Good from Habits',
-                value: '+${good.toStringAsFixed(2)}',
-                subtitle: 'Based on selected starters',
-                color: const Color(0xFF10B981),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _GlassCard(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Bad (Late-night/Skip/Scroll)',
-                      style: TextStyle(color: Color(0xFFfda4af), fontSize: 12, fontWeight: FontWeight.w500),
-                    ),
-                    const SizedBox(height: 8),
-                    SliderTheme(
-                      data: SliderTheme.of(context).copyWith(
-                        activeTrackColor: const Color(0xFFE11D48),
-                        inactiveTrackColor: Colors.white10,
-                        thumbColor: const Color(0xFFE11D48),
-                        overlayColor: const Color(0xFFE11D48).withOpacity(0.2),
-                        trackHeight: 4,
+            _GradientBackground(),
+            SafeArea(
+              child: Center(
+                child: Container(
+                  constraints: BoxConstraints(maxWidth: 900),
+                  padding: EdgeInsets.all(16),
+                  child: FadeTransition(
+                    opacity: _fadeAnimation,
+                    child: SlideTransition(
+                      position: _slideAnimation,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [
+                              Color(0xFF18181B).withOpacity(0.9),
+                              Colors.black,
+                            ],
+                          ),
+                          borderRadius: BorderRadius.circular(24),
+                          border: Border.all(color: Color(0xFF27272A)),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.5),
+                              blurRadius: 40,
+                              offset: Offset(0, 20),
+                            ),
+                          ],
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            _StepRail(current: _stepIndex),
+                            _buildHeader(),
+                            Flexible(
+                              child: SingleChildScrollView(
+                                padding: EdgeInsets.all(24),
+                                child: _buildCurrentStep(),
+                              ),
+                            ),
+                            if (_stepIndex != 7) _buildFooter(),
+                          ],
+                        ),
                       ),
-                      child: Slider(
-                        value: badScore,
-                        min: 0,
-                        max: 1,
-                        divisions: 20,
-                        onChanged: (v) => setState(() { badScore = v; _persist(); }),
-                      ),
                     ),
-                    Text(
-                      '-${badScore.toStringAsFixed(2)}',
-                      style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
-                    ),
-                  ],
+                  ),
                 ),
               ),
             ),
           ],
         ),
-        const SizedBox(height: 16),
-        _GlassCard(
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      ),
+    );
+  }
+
+  Widget _buildHeader() {
+    return Container(
+      padding: EdgeInsets.fromLTRB(24, 12, 24, 8),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Row(
             children: [
-              const Text('Net Score Preview', style: TextStyle(color: Colors.white70, fontWeight: FontWeight.w500)),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                width: 32,
+                height: 32,
                 decoration: BoxDecoration(
-                  color: net >= 0 ? const Color(0xFF10B981).withOpacity(0.15) : const Color(0xFFE11D48).withOpacity(0.15),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(
-                    color: net >= 0 ? const Color(0xFF10B981).withOpacity(0.3) : const Color(0xFFE11D48).withOpacity(0.3),
+                  color: Color(0xFF10B981).withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Center(
+                  child: Text(
+                    'D',
+                    style: TextStyle(
+                      color: Color(0xFF10B981),
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
                   ),
                 ),
-                child: Text(
-                  'Net ${net.toStringAsFixed(2)}',
-                  style: TextStyle(
-                    color: net >= 0 ? const Color(0xFF86efac) : const Color(0xFFfca5a5),
-                    fontWeight: FontWeight.w600,
+              ),
+              SizedBox(width: 8),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Drill OS',
+                    style: TextStyle(
+                      color: Color(0xFF9CA3AF),
+                      fontSize: 12,
+                    ),
                   ),
-                ),
+                  Text(
+                    'Active Habit Operating System',
+                    style: TextStyle(
+                      color: Color(0xFF6B7280),
+                      fontSize: 10,
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
-        ),
-      ],
+          _ProgressDots(current: _stepIndex, total: 8),
+        ],
+      ),
     );
   }
 
-  double _computeGoodScore() {
-    double sum = 0.0;
-    for (final h in _starterHabits) {
-      if (selectedHabits.contains(h[0])) {
-        sum += (h[2] as num).toDouble();
-      }
-    }
-    return sum;
-  }
-
-  Widget _buildPermissions() {
-    return Column(
-      children: [
-        _HeroCard(showNotificationIcon: true),
-        const SizedBox(height: 24),
-        _GlassCard(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const Text(
-              'Enable notifications so your mentor can reach you at the right moment.',
-              style: TextStyle(color: Colors.white70, height: 1.4),
-            ),
-            const SizedBox(height: 16),
-            _GlassButton(
-              label: notificationsEnabled ? '✓ Notifications Enabled' : 'Enable Notifications',
-              onTap: () => setState(() { notificationsEnabled = true; _persist(); }),
-              primary: !notificationsEnabled,
-            ),
-          ]),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildPaywall() {
-    final monthly = 4.99;
-    final yearly = 39.99;
-    final price = billing == 'monthly' ? monthly : yearly;
-    final saving = billing == 'yearly' ? (((1 - (yearly / (monthly * 12))) * 100).round()) : 0;
-
+  Widget _buildCurrentStep() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _GlassCard(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const Text(
-              'Unlock mentors with real voices, strictness levels, adaptive nudges, and report cards.',
-              style: TextStyle(color: Colors.white70, height: 1.4),
-            ),
-            const SizedBox(height: 16),
-            // Billing Toggle
-            Container(
-              padding: const EdgeInsets.all(4),
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.05),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.white10),
-              ),
-              child: Row(children: [
-                Expanded(
-                  child: _ToggleChip(
-                    label: 'Monthly',
-                    active: billing == 'monthly',
-                    onTap: () => setState(() { billing = 'monthly'; _persist(); }),
-                  ),
-                ),
-                Expanded(
-                  child: _ToggleChip(
-                    label: 'Yearly',
-                    active: billing == 'yearly',
-                    onTap: () => setState(() { billing = 'yearly'; _persist(); }),
-                  ),
-                ),
-              ]),
-            ),
-            const SizedBox(height: 12),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  '\$${price.toStringAsFixed(2)} ${billing == 'monthly' ? '/ month' : '/ year'}',
-                  style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600),
-                ),
-                if (saving > 0)
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF10B981).withOpacity(0.15),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text(
-                      'Save $saving%',
-                      style: const TextStyle(color: Color(0xFF86efac), fontSize: 12, fontWeight: FontWeight.w600),
-                    ),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            const _FeatureList(title: 'Free includes', features: [
-              'Smart alarms & streaks',
-              'Habits & tasks',
-              'Local stats',
-            ]),
-            const SizedBox(height: 16),
-            const _FeatureList(title: 'Pro adds', features: [
-              'AI mentors with real voices',
-              'Strictness levels + adaptive nudges',
-              'Weekly report cards & insights',
-              'Offset engine: bad cancels good',
-              'Duels, quests, seasonal events',
-            ]),
-            const SizedBox(height: 20),
-            Row(children: [
-              Expanded(
-                child: _GlassButton(
-                  label: billing == 'monthly' ? 'Start Pro – \$4.99' : 'Start Pro – \$39.99',
-                  onTap: _complete,
-                  primary: true,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _GlassButton(
-                  label: 'Maybe Later',
-                  onTap: _complete,
-                ),
-              ),
-            ]),
-            const SizedBox(height: 12),
-            const Text(
-              'By continuing you agree to our Terms & Privacy.',
-              style: TextStyle(color: Colors.white30, fontSize: 10),
-              textAlign: TextAlign.center,
-            ),
-          ]),
+        Text(
+          _getStepTitle(),
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 24,
+            fontWeight: FontWeight.w600,
+            letterSpacing: -0.5,
+          ),
+        ),
+        SizedBox(height: 4),
+        Text(
+          _getStepSubtitle(),
+          style: TextStyle(
+            color: Color(0xFF9CA3AF),
+            fontSize: 14,
+          ),
+        ),
+        SizedBox(height: 24),
+        AnimatedSwitcher(
+          duration: Duration(milliseconds: 200),
+          child: _buildStepContent(),
         ),
       ],
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    // Build steps on first build when context is available
-    if (steps.isEmpty) {
-      _buildSteps();
+  Widget _buildStepContent() {
+    switch (_stepIndex) {
+      case 0:
+        return _WelcomeStep(onNext: _next);
+      case 1:
+        return _AccountStep(onNext: _next, onLogin: widget.onLogin);
+      case 2:
+        return _MentorStep(
+          mentors: _mentors,
+          selectedMentor: _selectedMentor,
+          onSelect: (id) {
+            setState(() => _selectedMentor = id);
+            _saveState();
+          },
+        );
+      case 3:
+        return _HabitsStep(
+          habits: _starterHabits,
+          selectedHabits: _selectedHabits,
+          onToggle: (id) {
+            setState(() {
+              if (_selectedHabits.contains(id)) {
+                _selectedHabits.remove(id);
+              } else {
+                _selectedHabits.add(id);
+              }
+            });
+            _saveState();
+          },
+        );
+      case 4:
+        return _ScheduleStep(
+          schedule: _schedule,
+          onToggle: (key) {
+            setState(() => _schedule[key] = !_schedule[key]!);
+            _saveState();
+          },
+        );
+      case 5:
+        return _OffsetEngineDemo(
+          habits: _starterHabits,
+          selectedHabits: _selectedHabits,
+        );
+      case 6:
+        return _PermissionsStep(
+          enabled: _notificationsEnabled,
+          onEnable: () {
+            setState(() => _notificationsEnabled = true);
+            _saveState();
+          },
+        );
+      case 7:
+        return _PaywallStep(onComplete: widget.onComplete);
+      default:
+        return SizedBox();
     }
-    final spec = steps[stepIndex];
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: Stack(
+  }
+
+  Widget _buildFooter() {
+    String? errorMessage;
+    if (!_canProceed()) {
+      if (_stepIndex == 2) errorMessage = 'Select a mentor to continue';
+      if (_stepIndex == 3) errorMessage = 'Choose 3–6 starter habits';
+      if (_stepIndex == 4) errorMessage = 'Pick at least one time';
+    }
+
+    return Container(
+      padding: EdgeInsets.fromLTRB(24, 0, 24, 24),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          // Animated Gradient Orbs Background
-          AnimatedBuilder(
-            animation: _orbController,
-            builder: (context, child) {
-              return CustomPaint(
-                painter: _OrbPainter(_orbs, _orbController.value),
-                size: Size.infinite,
-              );
-            },
+          TextButton.icon(
+            onPressed: _stepIndex > 0 ? _prev : null,
+            icon: Icon(Icons.chevron_left, size: 16),
+            label: Text('Back'),
+            style: TextButton.styleFrom(
+              foregroundColor: _stepIndex > 0 ? Color(0xFF9CA3AF) : Color(0xFF4B5563),
+            ),
           ),
-          // Subtle Grid Overlay
-          CustomPaint(
-            painter: _GridPainter(),
-            size: Size.infinite,
-          ),
-          // Main Content
-          SafeArea(
-            child: FadeTransition(
-              opacity: _fadeController,
-              child: Padding(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    // Progress Rail
-                    _StepRail(steps: steps, current: stepIndex),
-                    const SizedBox(height: 20),
-                    // Header
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Row(children: [
-                          Container(
-                            width: 40,
-                            height: 40,
-                            decoration: BoxDecoration(
-                              gradient: const LinearGradient(
-                                colors: [Color(0xFF10B981), Color(0xFF059669)],
-                              ),
-                              borderRadius: BorderRadius.circular(12),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: const Color(0xFF10B981).withOpacity(0.3),
-                                  blurRadius: 8,
-                                  offset: const Offset(0, 2),
-                                ),
-                              ],
-                            ),
-                            alignment: Alignment.center,
-                            child: const Text(
-                              'D',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 18,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          const Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Drill OS',
-                                style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
-                              ),
-                              Text(
-                                'Active Habit Operating System',
-                                style: const TextStyle(color: Color(0x66FFFFFF), fontSize: 11),
-                              ),
-                            ],
-                          ),
-                        ]),
-                        _ProgressDots(index: stepIndex, total: steps.length),
-                      ],
-                    ),
-                    const SizedBox(height: 24),
-                    // Title & Subtitle
-                    Text(
-                      spec.title,
-                      style: const TextStyle(
-                        fontSize: 28,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.white,
-                        height: 1.2,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      spec.subtitle,
-                      style: const TextStyle(
-                        color: Colors.white60,
-                        fontSize: 16,
-                        height: 1.4,
-                      ),
-                    ),
-                    const SizedBox(height: 32),
-                    // Content
-                    Expanded(
-                      child: AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 300),
-                        child: Container(
-                          key: ValueKey(spec.id),
-                          child: spec.body,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                    // Navigation
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        if (stepIndex > 0)
-                          _GlassButton(
-                            label: '← Back',
-                            onTap: _prev,
-                          )
-                        else
-                          const SizedBox(width: 80),
-                        if (!canProceed)
-                          Text(
-                            (steps[stepIndex].id == 'mentor') ? 'Select a mentor' :
-                            (steps[stepIndex].id == 'habits') ? 'Choose 3–6' :
-                            (steps[stepIndex].id == 'schedule') ? 'Pick at least one' : '',
-                            style: const TextStyle(color: Color(0x66FFFFFF), fontSize: 12),
-                          )
-                        else
-                          const SizedBox(),
-                        _GlassButton(
-                          label: stepIndex == steps.length - 1 ? 'Complete' : 'Next →',
-                          onTap: canProceed ? _next : null,
-                          primary: true,
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
+          if (errorMessage != null)
+            Text(
+              errorMessage,
+              style: TextStyle(
+                color: Color(0xFF6B7280),
+                fontSize: 12,
               ),
+            ),
+          ElevatedButton(
+            onPressed: _canProceed() ? _next : null,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _canProceed() ? Color(0xFF10B981) : Color(0xFF27272A),
+              foregroundColor: _canProceed() ? Colors.black : Color(0xFF6B7280),
+              padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              elevation: _canProceed() ? 8 : 0,
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('Next', style: TextStyle(fontWeight: FontWeight.w600)),
+                SizedBox(width: 4),
+                Icon(Icons.chevron_right, size: 16),
+              ],
             ),
           ),
         ],
@@ -756,81 +441,79 @@ class _OnboardingScreenState extends State<OnboardingScreen>
   }
 }
 
-// Data Classes
-class _StepSpec {
-  final String id;
-  final String title;
-  final String subtitle;
-  final Widget body;
-  _StepSpec({required this.id, required this.title, required this.subtitle, required this.body});
-}
+// ============================================
+// GRADIENT BACKGROUND
+// ============================================
 
-class _OrbData {
-  final double x;
-  final double y;
-  final double size;
-  final double speed;
-  final Color color;
-  _OrbData({required this.x, required this.y, required this.size, required this.speed, required this.color});
-}
-
-// Custom Painters
-class _OrbPainter extends CustomPainter {
-  final List<_OrbData> orbs;
-  final double animation;
-
-  _OrbPainter(this.orbs, this.animation);
-
+class _GradientBackground extends StatelessWidget {
   @override
-  void paint(Canvas canvas, Size size) {
-    for (final orb in orbs) {
-      final paint = Paint()
-        ..shader = RadialGradient(
-          colors: [
-            orb.color,
-            orb.color.withOpacity(0.3),
-            Colors.transparent,
-          ],
-          stops: const [0.0, 0.7, 1.0],
-        ).createShader(Rect.fromCircle(
-          center: Offset(
-            (orb.x + math.sin(animation * 2 * math.pi * orb.speed) * 0.1) * size.width,
-            (orb.y + math.cos(animation * 2 * math.pi * orb.speed * 0.7) * 0.05) * size.height,
+  Widget build(BuildContext context) {
+    return Stack(
+      children: [
+        Positioned(
+          top: -128,
+          right: -64,
+          child: Container(
+            width: 384,
+            height: 384,
+            decoration: BoxDecoration(
+              color: Color(0xFF10B981).withOpacity(0.2),
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: Color(0xFF10B981).withOpacity(0.2),
+                  blurRadius: 200,
+                ),
+              ],
+            ),
           ),
-          radius: orb.size,
-        ));
-
-      canvas.drawCircle(
-        Offset(
-          (orb.x + math.sin(animation * 2 * math.pi * orb.speed) * 0.1) * size.width,
-          (orb.y + math.cos(animation * 2 * math.pi * orb.speed * 0.7) * 0.05) * size.height,
         ),
-        orb.size,
-        paint,
-      );
-    }
+        Positioned(
+          bottom: -112,
+          left: -80,
+          child: Container(
+            width: 448,
+            height: 448,
+            decoration: BoxDecoration(
+              color: Color(0xFF22C55E).withOpacity(0.1),
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: Color(0xFF22C55E).withOpacity(0.1),
+                  blurRadius: 200,
+                ),
+              ],
+            ),
+          ),
+        ),
+        // Subtle grid pattern overlay
+        Positioned.fill(
+          child: CustomPaint(
+            painter: _GridPainter(),
+          ),
+        ),
+      ],
+    );
   }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
 }
 
 class _GridPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = Colors.white.withOpacity(0.02)
-      ..strokeWidth = 1;
+      ..color = Colors.white.withOpacity(0.06)
+      ..strokeWidth = 1
+      ..style = PaintingStyle.stroke;
 
-    const spacing = 40.0;
+    const gridSize = 24.0;
     
-    // Vertical lines
-    for (double x = 0; x < size.width; x += spacing) {
+    // Draw vertical lines
+    for (double x = 0; x < size.width; x += gridSize) {
       canvas.drawLine(Offset(x, 0), Offset(x, size.height), paint);
     }
     
-    // Horizontal lines
-    for (double y = 0; y < size.height; y += spacing) {
+    // Draw horizontal lines
+    for (double y = 0; y < size.height; y += gridSize) {
       canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
     }
   }
@@ -839,446 +522,26 @@ class _GridPainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
-// UI Components
-class _GlassCard extends StatelessWidget {
-  final Widget child;
-  final EdgeInsets? padding;
-  
-  const _GlassCard({required this.child, this.padding});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: padding ?? const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.05),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: Colors.white.withOpacity(0.1),
-          width: 1,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.1),
-            blurRadius: 20,
-            offset: const Offset(0, 8),
-          ),
-        ],
-      ),
-      child: child,
-    );
-  }
-}
-
-class _HeroCard extends StatelessWidget {
-  final bool showNotificationIcon;
-  
-  const _HeroCard({this.showNotificationIcon = false});
-
-  @override
-  Widget build(BuildContext context) {
-    return _GlassCard(
-      child: Column(
-        children: [
-          // Mentor Avatars Row
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              _MentorAvatar('🎖️', 'Drill'),
-              _MentorAvatar('🏛️', 'Marcus'),
-              _MentorAvatar('📚', 'Confucius'),
-              _MentorAvatar('🧘', 'Buddha'),
-              _MentorAvatar('🎩', 'Lincoln'),
-            ],
-          ),
-          if (showNotificationIcon) ...[
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: const Color(0xFF10B981).withOpacity(0.1),
-                borderRadius: BorderRadius.circular(50),
-                border: Border.all(color: const Color(0xFF10B981).withOpacity(0.3)),
-              ),
-              child: const Icon(
-                Icons.notifications_active,
-                color: Color(0xFF10B981),
-                size: 24,
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _MentorAvatar extends StatelessWidget {
-  final String emoji;
-  final String name;
-  
-  const _MentorAvatar(this.emoji, this.name);
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Container(
-          width: 50,
-          height: 50,
-          decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(25),
-            border: Border.all(color: Colors.white.withOpacity(0.2)),
-          ),
-          child: Center(
-            child: Text(
-              emoji,
-              style: const TextStyle(fontSize: 20),
-            ),
-          ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          name,
-          style: const TextStyle(
-            color: Colors.white60,
-            fontSize: 10,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _MentorCard extends StatelessWidget {
-  final bool active;
-  final String emoji;
-  final String title;
-  final String subtitle;
-  final VoidCallback onTap;
-
-  const _MentorCard({
-    required this.active,
-    required this.emoji,
-    required this.title,
-    required this.subtitle,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: active 
-            ? const Color(0xFF10B981).withOpacity(0.1)
-            : Colors.white.withOpacity(0.05),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: active 
-              ? const Color(0xFF10B981).withOpacity(0.5)
-              : Colors.white.withOpacity(0.1),
-            width: active ? 2 : 1,
-          ),
-          boxShadow: active ? [
-            BoxShadow(
-              color: const Color(0xFF10B981).withOpacity(0.2),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
-            ),
-          ] : null,
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(
-              emoji,
-              style: const TextStyle(fontSize: 32),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              title,
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w600,
-                fontSize: 14,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 4),
-            Text(
-              subtitle,
-              style: const TextStyle(
-                color: Colors.white60,
-                fontSize: 11,
-              ),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _HabitCard extends StatelessWidget {
-  final bool active;
-  final String title;
-  final double weight;
-  final VoidCallback onTap;
-
-  const _HabitCard({
-    required this.active,
-    required this.title,
-    required this.weight,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: active 
-            ? const Color(0xFF10B981).withOpacity(0.1)
-            : Colors.white.withOpacity(0.05),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: active 
-              ? const Color(0xFF10B981).withOpacity(0.5)
-              : Colors.white.withOpacity(0.1),
-          ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Expanded(
-                  child: Text(
-                    title,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 13,
-                    ),
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF10B981).withOpacity(0.2),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    '+${weight.toStringAsFixed(2)}',
-                    style: const TextStyle(
-                      color: Color(0xFF86efac),
-                      fontSize: 10,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ScheduleCard extends StatelessWidget {
-  final bool active;
-  final String title;
-  final String subtitle;
-  final String icon;
-  final VoidCallback onTap;
-
-  const _ScheduleCard({
-    required this.active,
-    required this.title,
-    required this.subtitle,
-    required this.icon,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: active 
-            ? const Color(0xFF10B981).withOpacity(0.1)
-            : Colors.white.withOpacity(0.05),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: active 
-              ? const Color(0xFF10B981).withOpacity(0.5)
-              : Colors.white.withOpacity(0.1),
-          ),
-        ),
-        child: Column(
-          children: [
-            Text(
-              icon,
-              style: const TextStyle(fontSize: 24),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              title,
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w600,
-                fontSize: 14,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              subtitle,
-              style: const TextStyle(
-                color: Colors.white60,
-                fontSize: 11,
-              ),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _MetricCard extends StatelessWidget {
-  final String title;
-  final String value;
-  final String subtitle;
-  final Color color;
-
-  const _MetricCard({
-    required this.title,
-    required this.value,
-    required this.subtitle,
-    required this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return _GlassCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            title,
-            style: TextStyle(
-              color: color.withOpacity(0.8),
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            value,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 18,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            subtitle,
-            style: const TextStyle(
-              color: Color(0x66FFFFFF),
-              fontSize: 11,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _GlassButton extends StatelessWidget {
-  final String label;
-  final VoidCallback? onTap;
-  final bool primary;
-
-  const _GlassButton({
-    required this.label,
-    required this.onTap,
-    this.primary = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-        decoration: BoxDecoration(
-          gradient: primary ? const LinearGradient(
-            colors: [Color(0xFF10B981), Color(0xFF059669)],
-          ) : null,
-          color: primary ? null : Colors.white.withOpacity(0.05),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: primary 
-              ? Colors.transparent
-              : Colors.white.withOpacity(0.1),
-          ),
-          boxShadow: primary ? [
-            BoxShadow(
-              color: const Color(0xFF10B981).withOpacity(0.3),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
-            ),
-          ] : null,
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: primary ? Colors.white : Colors.white70,
-            fontWeight: FontWeight.w600,
-            fontSize: 14,
-          ),
-          textAlign: TextAlign.center,
-        ),
-      ),
-    );
-  }
-}
+// ============================================
+// PROGRESS DOTS
+// ============================================
 
 class _ProgressDots extends StatelessWidget {
-  final int index;
+  final int current;
   final int total;
 
-  const _ProgressDots({required this.index, required this.total});
+  const _ProgressDots({required this.current, required this.total});
 
   @override
   Widget build(BuildContext context) {
     return Row(
       children: List.generate(total, (i) {
-        final active = i == index;
-        final completed = i < index;
         return Container(
-          margin: const EdgeInsets.symmetric(horizontal: 2),
+          margin: EdgeInsets.symmetric(horizontal: 3),
+          width: i == current ? 24 : 8,
           height: 6,
-          width: active ? 24 : 6,
           decoration: BoxDecoration(
-            color: completed || active 
-              ? const Color(0xFF10B981)
-              : Colors.white.withOpacity(0.2),
+            color: i == current ? Color(0xFF10B981) : Color(0xFF3F3F46),
             borderRadius: BorderRadius.circular(3),
           ),
         );
@@ -1287,111 +550,1224 @@ class _ProgressDots extends StatelessWidget {
   }
 }
 
-class _Badge extends StatelessWidget {
-  final String text;
+// ============================================
+// STEP RAIL
+// ============================================
 
-  const _Badge(this.text);
+class _StepRail extends StatelessWidget {
+  final int current;
+
+  const _StepRail({required this.current});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white.withOpacity(0.2)),
-      ),
-      child: Text(
-        text,
-        style: const TextStyle(
-          color: Colors.white70,
-          fontSize: 12,
-          fontWeight: FontWeight.w500,
-        ),
+    final steps = ['welcome', 'account', 'mentor', 'habits', 'schedule', 'engine', 'permissions', 'paywall'];
+    final pct = ((current + 1) / steps.length);
+
+    return Padding(
+      padding: EdgeInsets.all(24),
+      child: Column(
+        children: [
+          Container(
+            height: 4,
+            decoration: BoxDecoration(
+              color: Color(0xFF27272A),
+              borderRadius: BorderRadius.circular(2),
+            ),
+            child: FractionallySizedBox(
+              alignment: Alignment.centerLeft,
+              widthFactor: pct,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Color(0xFF10B981),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
 }
 
-class _StepRail extends StatelessWidget {
-  final List<_StepSpec> steps;
-  final int current;
+// ============================================
+// DATA MODELS
+// ============================================
 
-  const _StepRail({required this.steps, required this.current});
+class Mentor {
+  final String id;
+  final String name;
+  final String tone;
+  final List<Color> gradient;
+
+  Mentor({required this.id, required this.name, required this.tone, required this.gradient});
+}
+
+class StarterHabit {
+  final String id;
+  final String label;
+  final double weight;
+  final IconData icon;
+
+  StarterHabit({required this.id, required this.label, required this.weight, required this.icon});
+}
+
+// ============================================
+// STEP COMPONENTS
+// ============================================
+
+class _WelcomeStep extends StatelessWidget {
+  final VoidCallback onNext;
+
+  const _WelcomeStep({required this.onNext});
 
   @override
   Widget build(BuildContext context) {
-    final progress = (current + 1) / steps.length;
-    
     return Column(
       children: [
-        Container(
-          height: 4,
-          decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(2),
-          ),
-          child: FractionallySizedBox(
-            alignment: Alignment.centerLeft,
-            widthFactor: progress,
-            child: Container(
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [Color(0xFF10B981), Color(0xFF059669)],
-                ),
-                borderRadius: BorderRadius.circular(2),
-              ),
+        _HeroCard(),
+        SizedBox(height: 24),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _FeatureItem(
+              icon: Icons.auto_awesome,
+              text: 'The FIRST Habit OS — alive, not passive like other apps',
             ),
-          ),
-        ),
-        const SizedBox(height: 8),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: steps.asMap().entries.map((entry) {
-            final i = entry.key;
-            final step = entry.value;
-            final active = i == current;
-            final completed = i < current;
-            
-            return Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 8,
-                  height: 8,
-                  decoration: BoxDecoration(
-                    color: completed || active 
-                      ? const Color(0xFF10B981)
-                      : Colors.white.withOpacity(0.2),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  step.id,
-                  style: TextStyle(
-                    color: completed || active 
-                      ? const Color(0xFF86efac)
-                      : Colors.white30,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ],
-            );
-          }).toList(),
+            SizedBox(height: 12),
+            _FeatureItem(
+              icon: Icons.notifications,
+              text: 'Daily nudges & mentor voices with strictness levels',
+            ),
+            SizedBox(height: 12),
+            _FeatureItem(
+              icon: Icons.local_fire_department,
+              text: 'Weekly report cards that judge and guide your progress',
+            ),
+          ],
         ),
       ],
     );
   }
 }
 
-class _ToggleChip extends StatelessWidget {
+class _AccountStep extends StatelessWidget {
+  final VoidCallback onNext;
+  final VoidCallback? onLogin;
+
+  const _AccountStep({required this.onNext, this.onLogin});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Sign in to sync your data and keep your streaks safe.',
+                style: TextStyle(color: Color(0xFFD1D5DB), fontSize: 14),
+              ),
+              SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () {
+                        onLogin?.call();
+                        onNext();
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.white,
+                        foregroundColor: Colors.black,
+                        padding: EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: Text('Continue with Email', style: TextStyle(fontWeight: FontWeight.w600)),
+                    ),
+                  ),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () {
+                        onLogin?.call();
+                        onNext();
+                      },
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.white,
+                        side: BorderSide(color: Color(0xFF3F3F46)),
+                        padding: EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: Text('Guest Mode'),
+                    ),
+                  ),
+                ],
+              ),
+              SizedBox(height: 8),
+              Text(
+                'You can link your account later in settings.',
+                style: TextStyle(color: Color(0xFF6B7280), fontSize: 11),
+              ),
+            ],
+          ),
+        ),
+        SizedBox(width: 24),
+        Expanded(
+          child: Container(
+            padding: EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Color(0xFF18181B).withOpacity(0.6),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Color(0xFF27272A)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Why sign in?',
+                  style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 14),
+                ),
+                SizedBox(height: 12),
+                _CheckItem(text: 'Cloud sync across devices'),
+                SizedBox(height: 8),
+                _CheckItem(text: 'Backup streaks & XP'),
+                SizedBox(height: 8),
+                _CheckItem(text: 'Early access features'),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _MentorStep extends StatelessWidget {
+  final List<Mentor> mentors;
+  final String? selectedMentor;
+  final Function(String) onSelect;
+
+  const _MentorStep({
+    required this.mentors,
+    required this.selectedMentor,
+    required this.onSelect,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        GridView.builder(
+          shrinkWrap: true,
+          physics: NeverScrollableScrollPhysics(),
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 2,
+            mainAxisSpacing: 12,
+            crossAxisSpacing: 12,
+            childAspectRatio: 2.5,
+          ),
+          itemCount: mentors.length,
+          itemBuilder: (context, i) {
+            final mentor = mentors[i];
+            final isSelected = selectedMentor == mentor.id;
+            return InkWell(
+              onTap: () => onSelect(mentor.id),
+              borderRadius: BorderRadius.circular(16),
+              child: Container(
+                padding: EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: isSelected ? Color(0xFF10B981).withOpacity(0.1) : Color(0xFF18181B).withOpacity(0.4),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: isSelected ? Color(0xFF10B981) : Color(0xFF27272A),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    _MentorAvatar(name: mentor.name, gradient: mentor.gradient, size: 48),
+                    SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            mentor.name,
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 13,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          SizedBox(height: 2),
+                          Text(
+                            mentor.tone,
+                            style: TextStyle(
+                              color: Color(0xFF9CA3AF),
+                              fontSize: 11,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          if (isSelected) ...[
+                            SizedBox(height: 4),
+                            Row(
+                              children: [
+                                Icon(Icons.check, color: Color(0xFF10B981), size: 12),
+                                SizedBox(width: 4),
+                                Text(
+                                  'Selected',
+                                  style: TextStyle(
+                                    color: Color(0xFF10B981),
+                                    fontSize: 10,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+        SizedBox(height: 12),
+        Text(
+          'You can switch mentors anytime in Settings.',
+          style: TextStyle(color: Color(0xFF6B7280), fontSize: 11),
+        ),
+      ],
+    );
+  }
+}
+
+class _HabitsStep extends StatelessWidget {
+  final List<StarterHabit> habits;
+  final Set<String> selectedHabits;
+  final Function(String) onToggle;
+
+  const _HabitsStep({
+    required this.habits,
+    required this.selectedHabits,
+    required this.onToggle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        GridView.builder(
+          shrinkWrap: true,
+          physics: NeverScrollableScrollPhysics(),
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 3,
+            mainAxisSpacing: 12,
+            crossAxisSpacing: 12,
+            childAspectRatio: 2.0,
+          ),
+          itemCount: habits.length,
+          itemBuilder: (context, i) {
+            final habit = habits[i];
+            final isSelected = selectedHabits.contains(habit.id);
+            return InkWell(
+              onTap: () => onToggle(habit.id),
+              borderRadius: BorderRadius.circular(16),
+              child: Container(
+                padding: EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: isSelected ? Color(0xFF10B981).withOpacity(0.1) : Color(0xFF18181B).withOpacity(0.4),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: isSelected ? Color(0xFF10B981) : Color(0xFF27272A),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      habit.icon,
+                      color: Color(0xFF10B981),
+                      size: 16,
+                    ),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        habit.label,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+        SizedBox(height: 12),
+        Text(
+          'Tip: Start with 3–6 habits. You can add more later.',
+          style: TextStyle(color: Color(0xFF6B7280), fontSize: 11),
+        ),
+      ],
+    );
+  }
+}
+
+class _ScheduleStep extends StatelessWidget {
+  final Map<String, bool> schedule;
+  final Function(String) onToggle;
+
+  const _ScheduleStep({required this.schedule, required this.onToggle});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: _ChoiceCard(
+            active: schedule['morning']!,
+            onTap: () => onToggle('morning'),
+            title: 'Morning',
+            subtitle: 'Primer & plan',
+            icon: Icons.wb_sunny,
+          ),
+        ),
+        SizedBox(width: 12),
+        Expanded(
+          child: _ChoiceCard(
+            active: schedule['midday']!,
+            onTap: () => onToggle('midday'),
+            title: 'Midday',
+            subtitle: 'Adaptive nudge',
+            icon: Icons.access_time,
+          ),
+        ),
+        SizedBox(width: 12),
+        Expanded(
+          child: _ChoiceCard(
+            active: schedule['evening']!,
+            onTap: () => onToggle('evening'),
+            title: 'Evening',
+            subtitle: 'Reflection',
+            icon: Icons.nightlight_round,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _OffsetEngineDemo extends StatefulWidget {
+  final List<StarterHabit> habits;
+  final Set<String> selectedHabits;
+
+  const _OffsetEngineDemo({required this.habits, required this.selectedHabits});
+
+  @override
+  State<_OffsetEngineDemo> createState() => _OffsetEngineDemoState();
+}
+
+class _OffsetEngineDemoState extends State<_OffsetEngineDemo> {
+  double _bad = 0.0;
+
+  @override
+  Widget build(BuildContext context) {
+    final good = widget.selectedHabits.fold<double>(
+      0.0,
+      (sum, id) => sum + (widget.habits.firstWhere((h) => h.id == id).weight),
+    );
+    final net = (good - _bad).clamp(-1.0, 1.0);
+
+    return Container(
+      padding: EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Color(0xFF18181B).withOpacity(0.6),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Color(0xFF27272A)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Offset Engine • Good − Bad = Net',
+                style: TextStyle(color: Colors.white, fontSize: 14),
+              ),
+              Container(
+                padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: (net >= 0 ? Color(0xFF10B981) : Color(0xFFF43F5E)).withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  'Net ${net.toStringAsFixed(2)}',
+                  style: TextStyle(
+                    color: net >= 0 ? Color(0xFF10B981) : Color(0xFFF43F5E),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: Container(
+                  padding: EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Color(0xFF10B981).withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Color(0xFF10B981).withOpacity(0.2)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Good from Habits',
+                        style: TextStyle(color: Color(0xFF10B981), fontSize: 12),
+                      ),
+                      SizedBox(height: 4),
+                      Text(
+                        '+${good.toStringAsFixed(2)}',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 20,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      SizedBox(height: 2),
+                      Text(
+                        'Based on selected starters',
+                        style: TextStyle(
+                          color: Color(0xFF10B981).withOpacity(0.7),
+                          fontSize: 9,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              SizedBox(width: 12),
+              Expanded(
+                child: Container(
+                  padding: EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Color(0xFFF43F5E).withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Color(0xFFF43F5E).withOpacity(0.2)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Bad (Late/Skip/Scroll)',
+                        style: TextStyle(color: Color(0xFFF43F5E), fontSize: 12),
+                      ),
+                      SizedBox(height: 8),
+                      Slider(
+                        value: _bad,
+                        onChanged: (v) => setState(() => _bad = v),
+                        min: 0,
+                        max: 1,
+                        activeColor: Color(0xFFF43F5E),
+                        inactiveColor: Color(0xFF3F3F46),
+                      ),
+                      Text(
+                        '−${_bad.toStringAsFixed(2)}',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 20,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              SizedBox(width: 12),
+              Expanded(
+                child: Container(
+                  padding: EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Color(0xFF27272A).withOpacity(0.6),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Color(0xFF3F3F46)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Net Score Preview',
+                        style: TextStyle(color: Color(0xFFD1D5DB), fontSize: 12),
+                      ),
+                      SizedBox(height: 4),
+                      Text(
+                        net >= 0 ? '↑ Positive Day' : '↓ Needs Course‑Correct',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      SizedBox(height: 2),
+                      Text(
+                        'Your mentor adapts tone based on this',
+                        style: TextStyle(
+                          color: Color(0xFF6B7280),
+                          fontSize: 9,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PermissionsStep extends StatelessWidget {
+  final bool enabled;
+  final VoidCallback onEnable;
+
+  const _PermissionsStep({required this.enabled, required this.onEnable});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: Container(
+            padding: EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Color(0xFF18181B).withOpacity(0.6),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Color(0xFF27272A)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Enable notifications so your mentor can reach you at the right moment.',
+                  style: TextStyle(color: Color(0xFFD1D5DB), fontSize: 14),
+                ),
+                SizedBox(height: 16),
+                _FeatureItem(icon: Icons.notifications, text: 'Timely nudges & alarms'),
+                SizedBox(height: 8),
+                _FeatureItem(icon: Icons.volume_up, text: 'Voice lines from your mentor'),
+                SizedBox(height: 8),
+                _FeatureItem(icon: Icons.shield, text: 'You control frequency & tone'),
+                SizedBox(height: 16),
+                ElevatedButton(
+                  onPressed: enabled ? null : onEnable,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: enabled ? Color(0xFF047857) : Color(0xFF10B981),
+                    foregroundColor: Colors.black,
+                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: Text(
+                    enabled ? 'Enabled' : 'Enable Notifications',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        SizedBox(width: 24),
+        Expanded(child: _HeroCard()),
+      ],
+    );
+  }
+}
+
+class _PaywallStep extends StatefulWidget {
+  final VoidCallback? onComplete;
+
+  const _PaywallStep({this.onComplete});
+
+  @override
+  State<_PaywallStep> createState() => _PaywallStepState();
+}
+
+class _PaywallStepState extends State<_PaywallStep> {
+  String _billing = 'monthly';
+
+  @override
+  Widget build(BuildContext context) {
+    final price = _billing == 'monthly' ? 4.99 : 39.99;
+    final saving = _billing == 'yearly' ? 33 : 0;
+
+    return Column(
+      children: [
+        Container(
+          decoration: BoxDecoration(
+            color: Color(0xFF09090B).withOpacity(0.7),
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: Color(0xFF27272A)),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Free Column
+              Expanded(
+                flex: 2,
+                child: Padding(
+                  padding: EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Free',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      SizedBox(height: 4),
+                      Text(
+                        'Start with the basics — alarms, habits, streaks.',
+                        style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 13),
+                      ),
+                      SizedBox(height: 16),
+                      _CheckItem(text: 'Smart alarms & streaks'),
+                      SizedBox(height: 8),
+                      _CheckItem(text: 'Habits & tasks'),
+                      SizedBox(height: 8),
+                      _CheckItem(text: 'Local stats'),
+                      SizedBox(height: 16),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton(
+                          onPressed: widget.onComplete,
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.white,
+                            side: BorderSide(color: Color(0xFF3F3F46)),
+                            padding: EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          child: Text('Continue Free'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              Container(width: 1, color: Color(0xFF27272A)),
+              // Pro Column
+              Expanded(
+                flex: 3,
+                child: Container(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        Color(0xFF10B981).withOpacity(0.15),
+                        Colors.transparent,
+                      ],
+                    ),
+                    borderRadius: BorderRadius.only(
+                      topRight: Radius.circular(24),
+                      bottomRight: Radius.circular(24),
+                    ),
+                  ),
+                  padding: EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                                                     Row(
+                            children: [
+                              Icon(Icons.workspace_premium, color: Color(0xFF10B981), size: 14),
+                              SizedBox(width: 6),
+                              Text(
+                                'PRO',
+                                style: TextStyle(
+                                  color: Color(0xFF10B981),
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                  letterSpacing: 1.5,
+                                ),
+                              ),
+                            ],
+                          ),
+                          Container(
+                            padding: EdgeInsets.all(4),
+                            decoration: BoxDecoration(
+                              color: Color(0xFF18181B),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Color(0xFF3F3F46)),
+                            ),
+                            child: Row(
+                              children: [
+                                _BillingButton(
+                                  label: 'Monthly',
+                                  active: _billing == 'monthly',
+                                  onTap: () => setState(() => _billing = 'monthly'),
+                                ),
+                                _BillingButton(
+                                  label: 'Yearly',
+                                  active: _billing == 'yearly',
+                                  onTap: () => setState(() => _billing = 'yearly'),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      SizedBox(height: 8),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Text(
+                            'Unlock Drill OS',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 20,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          SizedBox(width: 12),
+                          Text(
+                            '\$${price.toStringAsFixed(2)}',
+                            style: TextStyle(color: Color(0xFF10B981), fontSize: 16),
+                          ),
+                          Text(
+                            ' / ${_billing == 'monthly' ? 'month' : 'year'}',
+                            style: TextStyle(color: Color(0xFF10B981), fontSize: 12),
+                          ),
+                          if (saving > 0) ...[
+                            SizedBox(width: 8),
+                            Text(
+                              'Save $saving%',
+                              style: TextStyle(
+                                color: Color(0xFF10B981).withOpacity(0.8),
+                                fontSize: 9,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                      SizedBox(height: 4),
+                      Text(
+                        'Get the real OS: mentors with voices, strictness levels, adaptive nudges, report cards, duels and more.',
+                        style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 13),
+                      ),
+                      SizedBox(height: 16),
+                      Wrap(
+                        spacing: 12,
+                        runSpacing: 8,
+                        children: [
+                          _CheckItem(text: 'AI mentors with real voices', compact: true),
+                          _CheckItem(text: 'Strictness levels + adaptive nudges', compact: true),
+                          _CheckItem(text: 'Weekly report cards & insights', compact: true),
+                          _CheckItem(text: 'Offset engine: bad cancels good', compact: true),
+                          _CheckItem(text: 'Duels, quests, seasonal events', compact: true),
+                        ],
+                      ),
+                      SizedBox(height: 16),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: ElevatedButton(
+                              onPressed: () {},
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Color(0xFF10B981),
+                                foregroundColor: Colors.black,
+                                padding: EdgeInsets.symmetric(vertical: 12),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                elevation: 8,
+                              ),
+                              child: Text(
+                                'Start Pro – \$${_billing == 'monthly' ? '4.99' : '39.99'}',
+                                style: TextStyle(fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                          ),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: widget.onComplete,
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: Colors.white,
+                                side: BorderSide(color: Color(0xFF3F3F46)),
+                                padding: EdgeInsets.symmetric(vertical: 12),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                              child: Text('Maybe Later'),
+                            ),
+                          ),
+                        ],
+                      ),
+                      SizedBox(height: 8),
+                      Text(
+                        'Cancel anytime. Free plan stays with alarms, habits, streaks.',
+                        style: TextStyle(color: Color(0xFF6B7280), fontSize: 9),
+                      ),
+                      SizedBox(height: 16),
+                      // Testimonials
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          _TestimonialCard(
+                            name: 'Alex R.',
+                            text: 'Only habit app that actually moved my day. The mentor voice is… intense in a good way.',
+                          ),
+                          _TestimonialCard(
+                            name: 'Maya K.',
+                            text: 'Report cards + strictness fixed my 11pm doomscroll. Net score keeps me honest.',
+                          ),
+                          _TestimonialCard(
+                            name: 'Dev P.',
+                            text: 'Feels alive. It talks, nudges, and adapts. Kept my 28‑day streak.',
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        SizedBox(height: 12),
+        Text(
+          'By continuing you agree to our Terms & Privacy.',
+          style: TextStyle(color: Color(0xFF6B7280), fontSize: 11),
+        ),
+      ],
+    );
+  }
+}
+
+// ============================================
+// SHARED UI COMPONENTS
+// ============================================
+
+class _HeroCard extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Color(0xFF10B981).withOpacity(0.15),
+            Color(0xFF18181B),
+            Colors.black,
+          ],
+        ),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Color(0xFF27272A)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'DRILL OS',
+            style: TextStyle(
+              color: Color(0xFF10B981).withOpacity(0.8),
+              fontSize: 10,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 2,
+            ),
+          ),
+          SizedBox(height: 8),
+          Text(
+            'Active Habit Operating System',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 20,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          SizedBox(height: 8),
+          Text(
+            'A council of mentors that remembers, adapts, and pushes you daily.',
+            style: TextStyle(
+              color: Color(0xFF9CA3AF),
+              fontSize: 13,
+            ),
+          ),
+          SizedBox(height: 16),
+          Row(
+            children: [
+              _MentorAvatar(
+                name: 'Drill Sergeant',
+                gradient: [Color(0xFF10B981), Color(0xFF047857)],
+                size: 48,
+              ),
+              SizedBox(width: 8),
+              _MentorAvatar(
+                name: 'Marcus Aurelius',
+                gradient: [Color(0xFF84CC16), Color(0xFF047857)],
+                size: 48,
+              ),
+              SizedBox(width: 8),
+              _MentorAvatar(
+                name: 'Confucius',
+                gradient: [Color(0xFF6EE7B7), Color(0xFF047857)],
+                size: 48,
+              ),
+              SizedBox(width: 8),
+              _MentorAvatar(
+                name: 'Buddha',
+                gradient: [Color(0xFF5EEAD4), Color(0xFF047857)],
+                size: 48,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MentorAvatar extends StatelessWidget {
+  final String name;
+  final List<Color> gradient;
+  final double size;
+
+  const _MentorAvatar({
+    required this.name,
+    required this.gradient,
+    this.size = 64,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final initials = name
+        .split(' ')
+        .map((w) => w.isNotEmpty ? w[0] : '')
+        .take(2)
+        .join()
+        .toUpperCase();
+
+    // Map mentor names to actual image assets
+    final imageMap = {
+      'Drill Sergeant': 'assets/avatars/drill_sergeant.png',
+      'Marcus Aurelius': 'assets/avatars/marcus_aurelius.png',
+      'Confucius': 'assets/avatars/confucius.png',
+      'Buddha': 'assets/avatars/buddha.png',
+      'Abraham Lincoln': 'assets/avatars/abraham_lincoln.png',
+    };
+
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: gradient,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withOpacity(0.1)),
+        boxShadow: [
+          BoxShadow(
+            color: gradient[0].withOpacity(0.3),
+            blurRadius: 12,
+            offset: Offset(0, 4),
+          ),
+        ],
+      ),
+      child: imageMap.containsKey(name)
+          ? ClipRRect(
+              borderRadius: BorderRadius.circular(16),
+              child: Image.asset(
+                imageMap[name]!,
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stack) {
+                  return Center(
+                    child: Text(
+                      initials,
+                      style: TextStyle(
+                        color: Colors.black,
+                        fontWeight: FontWeight.bold,
+                        fontSize: size * 0.3,
+                      ),
+                    ),
+                  );
+                },
+              ),
+            )
+          : Center(
+              child: Text(
+                initials,
+                style: TextStyle(
+                  color: Colors.black,
+                  fontWeight: FontWeight.bold,
+                  fontSize: size * 0.3,
+                ),
+              ),
+            ),
+    );
+  }
+}
+
+class _FeatureItem extends StatelessWidget {
+  final IconData icon;
+  final String text;
+
+  const _FeatureItem({required this.icon, required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, color: Color(0xFF10B981), size: 16),
+        SizedBox(width: 12),
+        Expanded(
+          child: Text(
+            text,
+            style: TextStyle(color: Color(0xFFD1D5DB), fontSize: 13),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _CheckItem extends StatelessWidget {
+  final String text;
+  final bool compact;
+
+  const _CheckItem({required this.text, this.compact = false});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: compact ? MainAxisSize.min : MainAxisSize.max,
+      children: [
+        Icon(Icons.check, color: Color(0xFF10B981), size: compact ? 14 : 16),
+        SizedBox(width: compact ? 6 : 8),
+        if (compact)
+          Text(text, style: TextStyle(color: Colors.white, fontSize: 12))
+        else
+          Expanded(child: Text(text, style: TextStyle(color: Colors.white, fontSize: 13))),
+      ],
+    );
+  }
+}
+
+class _ChoiceCard extends StatelessWidget {
+  final bool active;
+  final VoidCallback onTap;
+  final String title;
+  final String subtitle;
+  final IconData icon;
+
+  const _ChoiceCard({
+    required this.active,
+    required this.onTap,
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: active ? Color(0xFF10B981).withOpacity(0.1) : Color(0xFF18181B).withOpacity(0.4),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: active ? Color(0xFF10B981) : Color(0xFF27272A),
+          ),
+        ),
+        child: Column(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: active ? Color(0xFF10B981) : Color(0xFF27272A),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(
+                icon,
+                color: active ? Colors.black : Color(0xFFD1D5DB),
+                size: 18,
+              ),
+            ),
+            SizedBox(height: 12),
+            Text(
+              title,
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+                fontSize: 14,
+              ),
+            ),
+            SizedBox(height: 4),
+            Text(
+              subtitle,
+              style: TextStyle(
+                color: Color(0xFF9CA3AF),
+                fontSize: 11,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _BillingButton extends StatelessWidget {
   final String label;
   final bool active;
   final VoidCallback onTap;
 
-  const _ToggleChip({
+  const _BillingButton({
     required this.label,
     required this.active,
     required this.onTap,
@@ -1399,115 +1775,71 @@ class _ToggleChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return InkWell(
       onTap: onTap,
+      borderRadius: BorderRadius.circular(6),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
-          gradient: active ? const LinearGradient(
-            colors: [Color(0xFF10B981), Color(0xFF059669)],
-          ) : null,
-          color: active ? null : Colors.transparent,
-          borderRadius: BorderRadius.circular(8),
+          color: active ? Color(0xFF10B981) : Colors.transparent,
+          borderRadius: BorderRadius.circular(6),
         ),
         child: Text(
           label,
           style: TextStyle(
-            color: active ? Colors.white : Colors.white60,
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
+            color: active ? Colors.black : Color(0xFFD1D5DB),
+            fontSize: 11,
+            fontWeight: active ? FontWeight.w600 : FontWeight.normal,
           ),
-          textAlign: TextAlign.center,
         ),
       ),
     );
   }
 }
 
-class _FeatureList extends StatelessWidget {
-  final String title;
-  final List<String> features;
+class _TestimonialCard extends StatelessWidget {
+  final String name;
+  final String text;
 
-  const _FeatureList({required this.title, required this.features});
+  const _TestimonialCard({required this.name, required this.text});
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          title,
-          style: const TextStyle(
-            color: Colors.white70,
-            fontWeight: FontWeight.w600,
-            fontSize: 14,
-          ),
-        ),
-        const SizedBox(height: 8),
-        ...features.map((feature) => Padding(
-          padding: const EdgeInsets.only(bottom: 4),
-          child: Row(
+    return Container(
+      width: 180,
+      padding: EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Color(0xFF18181B).withOpacity(0.6),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Color(0xFF27272A)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             children: [
-              const Icon(
-                Icons.check_circle,
-                size: 16,
-                color: Color(0xFF10B981),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  feature,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 12,
-                    height: 1.4,
-                  ),
+              Icon(Icons.star, color: Color(0xFF10B981), size: 12),
+              SizedBox(width: 6),
+              Text(
+                name,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 11,
                 ),
               ),
             ],
           ),
-        )),
-      ],
+          SizedBox(height: 6),
+          Text(
+            '"$text"',
+            style: TextStyle(
+              color: Color(0xFF9CA3AF),
+              fontSize: 10,
+            ),
+          ),
+        ],
+      ),
     );
-  }
-}
-
-// Lightweight JSON helpers
-String _encodeJson(Map<String, dynamic> map) => map.toString();
-Map<String, dynamic> _decodeJson(String s) {
-  try {
-    final trimmed = s.trim();
-    if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) return {};
-    final body = trimmed.substring(1, trimmed.length - 1);
-    final parts = body.isEmpty ? <String>[] : body.split(', ');
-    final map = <String, dynamic>{};
-    for (final p in parts) {
-      final idx = p.indexOf(': ');
-      if (idx <= 0) continue;
-      final k = p.substring(0, idx);
-      final v = p.substring(idx + 2);
-      final key = k;
-      dynamic val = v == 'true' ? true : v == 'false' ? false : int.tryParse(v) ?? double.tryParse(v) ?? (v == 'null' ? null : v);
-      if (key == 'selectedHabits') {
-        if (v.startsWith('[') && v.endsWith(']')) {
-          final inner = v.substring(1, v.length - 1);
-          final items = inner.isEmpty ? <String>[] : inner.split(', ').map((e) => e.trim());
-          val = items.toList();
-        } else {
-          val = <String>[];
-        }
-      }
-      if (key == 'schedule') {
-        final sched = <String, dynamic>{};
-        sched['morning'] = s.contains('morning: true');
-        sched['midday'] = s.contains('midday: true');
-        sched['evening'] = s.contains('evening: true');
-        val = sched;
-      }
-      map[key] = val;
-    }
-    return map;
-  } catch (_) {
-    return {};
   }
 } 
