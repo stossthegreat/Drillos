@@ -1,0 +1,17 @@
+# Keep Flutter core
+-keep class io.flutter.** { *; }
+-keep class io.flutter.plugins.** { *; }
+
+# Keep Google Play Core (SplitInstallManager etc.)
+-keep class com.google.android.play.core.** { *; }
+
+# Prevent stripping any PlayStoreDeferredComponentManager references
+-keep class io.flutter.embedding.engine.deferredcomponents.** { *; }
+
+# Keep entry points used by reflection
+-keepclassmembers class * {
+    @android.webkit.JavascriptInterface <methods>;
+}
+-keepattributes *Annotation*, Signature
+-dontwarn com.google.android.play.core.**
+-dontwarn io.flutter.embedding.engine.deferredcomponents.**
