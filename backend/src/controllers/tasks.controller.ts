@@ -13,7 +13,7 @@ function getUserIdOrThrow(req: any): string {
 export async function tasksController(fastify: FastifyInstance) {
   const service = tasksService;
 
-  // Helper to ensure demo user exists
+  // ✅ Ensure demo user exists (for dev mode)
   async function ensureDemoUser(userId: string) {
     if (userId === "demo-user-123") {
       const existingUser = await prisma.user.findUnique({ where: { id: userId } });
@@ -38,72 +38,44 @@ export async function tasksController(fastify: FastifyInstance) {
     }
   }
 
-  // GET /api/v1/tasks
-  fastify.get("/api/v1/tasks", {
-    schema: {
-      tags: ["Tasks"],
-      summary: "List user's tasks",
-      querystring: {
-        type: 'object',
-        properties: {
-          includeCompleted: { type: 'boolean', default: false },
-        },
-      },
-      response: { 200: { type: 'array' }, 400: { type: 'object' }, 401: { type: 'object' } },
-    },
-  }, async (req: any, reply) => {
+  // 📋 List tasks
+  fastify.get("/api/v1/tasks", async (req: any, reply) => {
     try {
       const userId = getUserIdOrThrow(req);
-      const includeCompleted = req.query.includeCompleted === 'true' || req.query.includeCompleted === true;
-      return await service.list(userId, includeCompleted);
+      const includeCompleted =
+        req.query.includeCompleted === "true" || req.query.includeCompleted === true;
+      const result = await service.list(userId, includeCompleted);
+      return result;
     } catch (e: any) {
       return reply.code(401).send({ error: e.message });
     }
   });
 
-  // GET /api/v1/tasks/:id
-  fastify.get("/api/v1/tasks/:id", {
-    schema: {
-      tags: ["Tasks"],
-      summary: "Get task by ID",
-      params: { type: 'object', required: ['id'], properties: { id: { type: 'string' } } },
-      response: { 200: { type: 'object' }, 400: { type: 'object' }, 401: { type: 'object' }, 404: { type: 'object' } },
-    },
-  }, async (req: any, reply) => {
+  // 🔍 Get task by ID
+  fastify.get("/api/v1/tasks/:id", async (req: any, reply) => {
     try {
       const userId = getUserIdOrThrow(req);
-      const { id } = req.params;
-      const task = await service.getById(id, userId);
+      const task = await service.getById(req.params.id, userId);
       if (!task) return reply.code(404).send({ error: "Task not found" });
       return task;
     } catch (e: any) {
-      return reply.code(401).send({ error: e.message });
+      return reply.code(400).send({ error: e.message });
     }
   });
 
-  // POST /api/v1/tasks
-  fastify.post("/api/v1/tasks", {
-    schema: {
-      tags: ["Tasks"],
-      summary: "Create a new task",
-      body: {
-        type: 'object',
-        required: ['title'],
-        properties: {
-          title: { type: 'string' },
-          description: { type: 'string' },
-          dueDate: { type: 'string', format: 'date-time' },
-          priority: { type: 'number', minimum: 1, maximum: 3 },
-          category: { type: 'string' },
-        },
-      },
-      response: { 201: { type: 'object' }, 400: { type: 'object' }, 401: { type: 'object' } },
-    },
-  }, async (req: any, reply) => {
+  // ➕ Create task
+  fastify.post("/api/v1/tasks", async (req: any, reply) => {
     try {
       const userId = getUserIdOrThrow(req);
       await ensureDemoUser(userId);
-      const task = await service.create(userId, req.body);
+      const body = req.body || {};
+      const task = await service.create(userId, {
+        title: body.title,
+        description: body.description,
+        dueDate: body.dueDate ? new Date(body.dueDate) : undefined,
+        priority: body.priority,
+        category: body.category,
+      });
       reply.code(201);
       return task;
     } catch (e: any) {
@@ -111,70 +83,35 @@ export async function tasksController(fastify: FastifyInstance) {
     }
   });
 
-  // PATCH /api/v1/tasks/:id
-  fastify.patch("/api/v1/tasks/:id", {
-    schema: {
-      tags: ["Tasks"],
-      summary: "Update a task",
-      params: { type: 'object', required: ['id'], properties: { id: { type: 'string' } } },
-      body: {
-        type: 'object',
-        properties: {
-          title: { type: 'string' },
-          description: { type: 'string' },
-          dueDate: { type: 'string', format: 'date-time' },
-          priority: { type: 'number', minimum: 1, maximum: 3 },
-          category: { type: 'string' },
-          completed: { type: 'boolean' },
-        },
-      },
-      response: { 200: { type: 'object' }, 400: { type: 'object' }, 401: { type: 'object' } },
-    },
-  }, async (req: any, reply) => {
+  // ✏️ Update task
+  fastify.patch("/api/v1/tasks/:id", async (req: any, reply) => {
     try {
       const userId = getUserIdOrThrow(req);
-      const { id } = req.params;
-      const updatedTask = await service.update(id, userId, req.body);
-      return updatedTask;
+      const updated = await service.update(req.params.id, userId, req.body);
+      return updated;
     } catch (e: any) {
       return reply.code(400).send({ error: e.message });
     }
   });
 
-  // POST /api/v1/tasks/:id/complete
-  fastify.post("/api/v1/tasks/:id/complete", {
-    schema: {
-      tags: ["Tasks"],
-      summary: "Mark a task as complete",
-      params: { type: 'object', required: ['id'], properties: { id: { type: 'string' } } },
-      response: { 200: { type: 'object' }, 400: { type: 'object' }, 401: { type: 'object' } },
-    },
-  }, async (req: any, reply) => {
+  // ✅ Complete task
+  fastify.post("/api/v1/tasks/:id/complete", async (req: any, reply) => {
     try {
       const userId = getUserIdOrThrow(req);
       await ensureDemoUser(userId);
-      const { id } = req.params;
-      const completedTask = await service.complete(id, userId);
-      return completedTask;
+      const result = await service.complete(req.params.id, userId);
+      return result;
     } catch (e: any) {
       return reply.code(400).send({ error: e.message });
     }
   });
 
-  // DELETE /api/v1/tasks/:id
-  fastify.delete("/api/v1/tasks/:id", {
-    schema: {
-      tags: ["Tasks"],
-      summary: "Delete a task",
-      params: { type: 'object', required: ['id'], properties: { id: { type: 'string' } } },
-      response: { 200: { type: 'object' }, 400: { type: 'object' }, 401: { type: 'object' } },
-    },
-  }, async (req: any, reply) => {
+  // ❌ Delete task
+  fastify.delete("/api/v1/tasks/:id", async (req: any, reply) => {
     try {
       const userId = getUserIdOrThrow(req);
       await ensureDemoUser(userId);
-      const { id } = req.params;
-      const result = await service.delete(id, userId);
+      const result = await service.delete(req.params.id, userId);
       return result;
     } catch (e: any) {
       return reply.code(400).send({ error: e.message });
