@@ -43,7 +43,12 @@ class DrillSergeantApp extends StatelessWidget {
       initialLocation: '/onboarding',
       routes: [
         GoRoute(path: '/design', builder: (c, s) => const DesignGallery()),
-        GoRoute(path: '/onboarding', builder: (c, s) => const DrillOSOnboarding()),
+        GoRoute(path: '/onboarding', builder: (c, s) => DrillOSOnboarding(
+          onComplete: () {
+            // Navigate to home screen when onboarding is complete
+            context.go('/home');
+          },
+        )),
         ShellRoute(
           builder: (context, state, child) => RootShell(child: child),
           routes: [
