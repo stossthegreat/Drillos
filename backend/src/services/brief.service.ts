@@ -6,17 +6,15 @@ import { tasksService } from "./tasks.service";
 
 // Lazy OpenAI initialization - only when actually needed
 function getOpenAIClient() {
-  // Skip OpenAI initialization during build process
   if (process.env.NODE_ENV === 'build' || process.env.RAILWAY_ENVIRONMENT === 'build') {
     return null;
   }
-  
-  // Validate required environment variables
+
   if (!process.env.OPENAI_API_KEY) {
     console.warn('⚠️ OpenAI API key not available, AI features will be disabled');
     return null;
   }
-  
+
   return new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 }
 
@@ -28,16 +26,13 @@ export class BriefService {
     const openai = getOpenAIClient();
     if (!openai) {
       console.warn('⚠️ OpenAI not available, using fallback brief');
-      // Fallback still returns full data for UI
+
       const user = await prisma.user.findUnique({ where: { id: userId } });
       const habits = await habitsService.list(userId);
       const tasks = await tasksService.list(userId, false);
 
       const todaySelections = await prisma.todaySelection.findMany({
-        where: {
-          userId,
-          date: new Date().toISOString().split('T')[0]
-        },
+        where: { userId, date: new Date().toISOString().split('T')[0] },
         include: { habit: true, task: true },
       });
 
@@ -47,8 +42,9 @@ export class BriefService {
             id: selection.habit.id,
             name: selection.habit.title,
             type: 'habit',
-            completed: selection.habit.lastTick ?
-              new Date(selection.habit.lastTick).toDateString() === new Date().toDateString() : false,
+            completed: selection.habit.lastTick
+              ? new Date(selection.habit.lastTick).toDateString() === new Date().toDateString()
+              : false,
             streak: selection.habit.streak,
             color: (selection.habit as any).color ?? 'emerald',
             reminderEnabled: (selection.habit as any).reminderEnabled ?? false,
@@ -78,16 +74,16 @@ export class BriefService {
     }
 
     const user = await prisma.user.findUnique({ where: { id: userId } });
-           const habits = await habitsService.list(userId);
-           const tasks = await tasksService.list(userId, true); // Include completed tasks
+    const habits = await habitsService.list(userId);
+    const tasks = await tasksService.list(userId, true); // Include completed tasks
 
-    const completed = habits.filter(h => h.status === "completed_today").length;
+    const completed = habits.filter(h => h.completedToday).length;
     const pending = habits.length - completed;
 
     const context = `
 User: ${user?.id}
 Mentor: ${user?.mentorId ?? "marcus"}
-Habits: ${habits.map(h => `${h.title} (streak ${h.streak}, status ${h.status})`).join(", ")}
+Habits: ${habits.map(h => `${h.title} (streak ${h.streak}, completedToday ${h.completedToday})`).join(", ")}
 Stats: ${completed} completed, ${pending} pending
 `;
 
@@ -111,27 +107,20 @@ Focus on today's pending habits and streak risks.
     const voiceResult = await voiceService.speak(userId, text, user?.mentorId ?? "marcus");
     const voiceUrl = voiceResult.url;
 
-    // Get today's selected items
     const todaySelections = await prisma.todaySelection.findMany({
-      where: { 
-        userId,
-        date: new Date().toISOString().split('T')[0] // Today's date
-      },
-      include: {
-        habit: true,
-        task: true,
-      }
+      where: { userId, date: new Date().toISOString().split('T')[0] },
+      include: { habit: true, task: true },
     });
 
-    // Build today's items from selections
     const today = todaySelections.map(selection => {
       if (selection.habit) {
         return {
           id: selection.habit.id,
           name: selection.habit.title,
           type: 'habit',
-          completed: selection.habit.lastTick ? 
-            new Date(selection.habit.lastTick).toDateString() === new Date().toDateString() : false,
+          completed: selection.habit.lastTick
+            ? new Date(selection.habit.lastTick).toDateString() === new Date().toDateString()
+            : false,
           streak: selection.habit.streak,
           color: (selection.habit as any).color ?? 'emerald',
           reminderEnabled: (selection.habit as any).reminderEnabled ?? false,
@@ -154,9 +143,9 @@ Focus on today's pending habits and streak risks.
       message: text,
       audio: voiceUrl,
       missions: habits,
-      habits: habits,
-      tasks: tasks,
-      today: today,
+      habits,
+      tasks,
+      today,
     };
   }
 
@@ -175,7 +164,7 @@ Focus on today's pending habits and streak risks.
     const user = await prisma.user.findUnique({ where: { id: userId } });
     const habits = await habitsService.list(userId);
 
-    const completed = habits.filter(h => h.status === "completed_today").length;
+    const completed = habits.filter(h => h.completedToday).length;
 
     const prompt = `
 You are ${user?.mentorId ?? "Drill Sergeant"}.
