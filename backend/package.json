@@ -10,8 +10,12 @@
     "worker": "node dist/workers/scheduler.worker.js",
     "postinstall": "prisma generate",
     "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate deploy"
+    "prisma:migrate": "prisma migrate deploy",
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
+  "keywords": [],
+  "author": "DrillOS Team",
+  "license": "ISC",
   "dependencies": {
     "@aws-sdk/client-s3": "^3.899.0",
     "@fastify/cors": "^11.1.0",
