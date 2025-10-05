@@ -30,7 +30,11 @@ export class HabitsService {
     });
 
     const todayKey = new Date().toISOString().split("T")[0];
-    return habits.map((h) => ({
+    
+    // ⚡ FILTER: Only return habits scheduled for today
+    const todayHabits = habits.filter(h => this.isScheduledToday(h.schedule));
+    
+    return todayHabits.map((h) => ({
       ...h,
       completedToday:
         h.lastTick &&

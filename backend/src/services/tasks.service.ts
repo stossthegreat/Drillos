@@ -36,7 +36,10 @@ export class TasksService {
       orderBy: { createdAt: "asc" },
     });
 
-    return tasks.map((t) => ({
+    // ⚡ FILTER: Only return tasks scheduled for today
+    const todayTasks = tasks.filter(t => this.isScheduledToday(t.schedule));
+
+    return todayTasks.map((t) => ({
       ...t,
       overdue: t.dueDate ? new Date(t.dueDate) < new Date() && !t.completed : false,
       status: t.completed ? "completed" : "pending",
