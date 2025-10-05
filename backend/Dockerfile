@@ -1,28 +1,19 @@
-# Use Node.js LTS (rebuild 2025-10-03)
 FROM node:20-alpine
 
 WORKDIR /app
 
-# Copy package.json + lock first
+# Copy package files
 COPY package*.json ./
-COPY tsconfig.json ./
-COPY prisma ./prisma
 
-# Install ALL dependencies (including dev dependencies for build)
-RUN npm ci
+# Install dependencies
+RUN npm ci --only=production
 
-# Copy all source
-COPY . .
-
-# Build TS -> JS (with environment set for build)
-ENV NODE_ENV=build
-RUN npm run build
-
-# Remove dev dependencies to reduce image size
-RUN npm prune --production
+# Copy built application
+COPY dist/ ./dist/
+COPY prisma/ ./prisma/
 
 # Expose port
-EXPOSE 8080
+EXPOSE 3000
 
-# Run Prisma migrations on startup
-CMD npx prisma migrate deploy && node dist/server.js
+# Start the scheduler worker
+CMD ["node", "dist/workers/scheduler.worker.js"]
