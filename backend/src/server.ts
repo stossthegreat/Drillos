@@ -31,27 +31,21 @@ dotenv.config();
 
 // ✅ Validate env vars before boot
 function validateEnv() {
-  // Skip validation during build process
   if (process.env.NODE_ENV === 'build' || process.env.RAILWAY_ENVIRONMENT === 'build') {
     console.log('⏭️ Skipping env validation during build process');
     return;
   }
 
-  // For Railway deployment, be more lenient with required vars
   const required = [];
-  
-  // Only require DATABASE_URL and REDIS_URL if we're not in Railway
   if (!process.env.RAILWAY_ENVIRONMENT) {
     required.push('DATABASE_URL', 'REDIS_URL');
   }
-  
   const missing = required.filter((key) => !process.env[key]);
   if (missing.length > 0) {
     console.error('❌ Missing critical env vars:', missing.join(', '));
     process.exit(1);
   }
-  
-  // Warn about optional but useful env vars
+
   const optional = [
     'OPENAI_API_KEY',
     'ELEVENLABS_API_KEY',
@@ -63,50 +57,42 @@ function validateEnv() {
   if (missingOptional.length > 0) {
     console.warn('⚠️ Missing optional env vars (some features may not work):', missingOptional.join(', '));
   }
-  
+
   console.log('✅ Core env vars validated.');
 }
 
 // ✅ Startup integration checks
 async function runStartupChecks() {
   const results: Record<string, any> = {};
-  
-  // Only check critical services if they're available
+
   if (process.env.DATABASE_URL) {
     try {
-      await prisma.$queryRaw`SELECT 1`; 
+      await prisma.$queryRaw`SELECT 1`;
       results.postgres = 'ok';
-    } catch (e: any) { 
-      results.postgres = `error: ${e.message}`; 
+    } catch (e: any) {
+      results.postgres = `error: ${e.message}`;
     }
-  } else {
-    results.postgres = 'skipped (no DATABASE_URL)';
-  }
+  } else results.postgres = 'skipped (no DATABASE_URL)';
 
   if (process.env.REDIS_URL) {
     try {
       const redisClient = getRedis();
-      await redisClient.ping(); 
+      await redisClient.ping();
       results.redis = 'ok';
-    } catch (e: any) { 
-      results.redis = `error: ${e.message}`; 
+    } catch (e: any) {
+      results.redis = `error: ${e.message}`;
     }
-  } else {
-    results.redis = 'skipped (no REDIS_URL)';
-  }
+  } else results.redis = 'skipped (no REDIS_URL)';
 
-  // Skip optional service checks if API keys are missing
   if (process.env.OPENAI_API_KEY) {
     try {
       const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-      await client.models.list(); 
+      await client.models.list();
       results.openai = 'ok';
-    } catch (e: any) { 
-      results.openai = `error: ${e.message}`; 
+    } catch (e: any) {
+      results.openai = `error: ${e.message}`;
     }
-  } else {
-    results.openai = 'skipped (no API key)';
-  }
+  } else results.openai = 'skipped (no API key)';
 
   if (process.env.ELEVENLABS_API_KEY) {
     try {
@@ -114,12 +100,10 @@ async function runStartupChecks() {
         headers: { 'xi-api-key': process.env.ELEVENLABS_API_KEY },
       });
       results.elevenlabs = res.ok ? 'ok' : 'error';
-    } catch (e: any) { 
-      results.elevenlabs = `error: ${e.message}`; 
+    } catch (e: any) {
+      results.elevenlabs = `error: ${e.message}`;
     }
-  } else {
-    results.elevenlabs = 'skipped (no API key)';
-  }
+  } else results.elevenlabs = 'skipped (no API key)';
 
   if (process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY) {
     try {
@@ -133,124 +117,87 @@ async function runStartupChecks() {
         });
       }
       results.firebase = 'ok';
-    } catch (e: any) { 
-      results.firebase = `error: ${e.message}`; 
+    } catch (e: any) {
+      results.firebase = `error: ${e.message}`;
     }
-  } else {
-    results.firebase = 'skipped (no credentials)';
-  }
+  } else results.firebase = 'skipped (no credentials)';
 
   if (process.env.STRIPE_SECRET_KEY) {
     try {
       const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2025-08-27.basil' });
       await stripe.accounts.retrieve();
       results.stripe = 'ok';
-    } catch (e: any) { 
-      results.stripe = `error: ${e.message}`; 
+    } catch (e: any) {
+      results.stripe = `error: ${e.message}`;
     }
-  } else {
-    results.stripe = 'skipped (no API key)';
-  }
+  } else results.stripe = 'skipped (no API key)';
 
   return results;
 }
 
-// ✅ Build Fastify server
+// ✅ Build Fastify server (FULL + FIX)
 const buildServer = () => {
   const fastify = Fastify({ logger: true });
 
+  // ✅ FIX: allow empty JSON bodies for DELETE / PATCH / etc
+  fastify.addContentTypeParser('application/json', { parseAs: 'string' }, (req, body: any, done) => {
+    if (!body) return done(null, {}); // Treat empty as {}
+    try {
+      const json = JSON.parse(body);
+      done(null, json);
+    } catch (err: any) {
+      err.statusCode = 400;
+      done(err);
+    }
+  });
+
+  // ✅ Optional safety: strip JSON content-type for empty GET/DELETE
+  fastify.addHook('onRequest', (req, _reply, done) => {
+    if ((req.method === 'DELETE' || req.method === 'GET') &&
+        (req.headers['content-type'] || '').includes('application/json') &&
+        !req.headers['content-length']) {
+      delete req.headers['content-type'];
+    }
+    done();
+  });
+
+  // ✅ CORS + Docs
   fastify.register(cors, { 
     origin: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'x-user-id', 'idempotency-key'],
-    credentials: true
+    credentials: true,
   });
   fastify.register(swagger, {
     openapi: {
       openapi: '3.0.0',
-      info: { title: 'HabitOS API', version: '1.0.0', description: 'The full-scale DrillSergeant / HabitOS API' },
+      info: { title: 'HabitOS API', version: '1.0.0', description: 'Full-scale DrillSergeant / HabitOS API' },
       servers: [{ url: process.env.BACKEND_PUBLIC_URL || 'http://localhost:8080' }],
     },
   });
   fastify.register(swaggerUI, { routePrefix: '/docs', uiConfig: { docExpansion: 'full', deepLinking: false } });
 
-  // Root endpoint for Railway
-  fastify.get('/', async (request, reply) => {
-    return { 
-      message: 'HabitOS API is running',
-      health: '/health',
-      docs: '/docs',
-      status: 'ok'
-    };
-  });
+  // ✅ Routes
+  fastify.get('/', async () => ({
+    message: 'HabitOS API is running',
+    docs: '/docs',
+    health: '/health',
+    status: 'ok',
+  }));
 
-  // Dev helper: ensure demo user exists
-  fastify.addHook('onReady', async () => {
-    try {
-      const id = 'demo-user-123';
-      const u = await prisma.user.findUnique({ where: { id } });
-      if (!u) {
-        await prisma.user.create({
-          data: {
-            id,
-            email: 'demo@example.com',
-            tone: 'balanced' as any,
-            intensity: 2,
-            mentorId: 'drill',
-            plan: 'FREE' as any,
-          },
-        });
-        console.log('👤 Created demo user:', id);
-      }
-    } catch (e) {
-      console.warn('⚠️ Could not ensure demo user:', (e as any)?.message);
-    }
-  });
+  fastify.get('/health', async () => ({
+    ok: true,
+    status: 'healthy',
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+  }));
 
-  // health + startup-check
-  fastify.get('/health', async (request, reply) => {
-    try {
-      // Log health check requests for debugging
-      console.log('🏥 Health check requested from:', request.headers['user-agent'] || 'unknown');
-      console.log('🏥 Host header:', request.headers.host);
-      
-      // Simple health check - no external calls
-      const response = { 
-        ok: true, 
-        status: 'healthy',
-        timestamp: new Date().toISOString(),
-        uptime: process.uptime(),
-        version: '1.0.0',
-        environment: process.env.NODE_ENV || 'development',
-        port: process.env.PORT || 8080
-      };
-      
-      console.log('✅ Health check response:', response);
-      return response;
-    } catch (error) {
-      console.error('❌ Health check failed:', error);
-      reply.code(500);
-      return { ok: false, error: 'Health check failed' };
-    }
-  });
-
-  // Railway-specific health check endpoint
-  fastify.get('/healthz', async (request, reply) => {
-    try {
-      // Ultra-simple health check for Railway
-      return { status: 'ok' };
-    } catch (error) {
-      reply.code(500);
-      return { status: 'error' };
-    }
-  });
-  
   fastify.get('/startup-check', async () => {
     const checks = await runStartupChecks();
     return { ok: Object.values(checks).every((v) => v === 'ok'), checks };
   });
 
-  // controllers
+  // ✅ Controllers
   fastify.register(habitsController);
   fastify.register(alarmsController);
   fastify.register(streaksController);
@@ -269,35 +216,16 @@ const buildServer = () => {
 const start = async () => {
   try {
     console.log('🚀 Starting HabitOS API...');
-    
-    // Validate environment (skip during build)
     validateEnv();
-    
-    console.log('🔧 Building server...');
     const server = buildServer();
-    
+
     const port = process.env.PORT ? Number(process.env.PORT) : 8080;
     const host = process.env.HOST || '0.0.0.0';
-    
-    console.log(`🌐 Listening on ${host}:${port}...`);
     await server.listen({ port, host });
-    
-    console.log(`🚀 HabitOS API running at ${process.env.BACKEND_PUBLIC_URL || `http://localhost:${port}`}`);
-    console.log('📖 Docs available at /docs');
-    console.log('🩺 Health check available at /health');
-    console.log('🔍 Startup check available at /startup-check');
-    console.log('✅ Server startup complete!');
-    
-    // 🚀 Boot schedulers AFTER server is ready (async, don't wait)
-    setImmediate(() => {
-      console.log('⏰ Starting schedulers...');
-      bootstrapSchedulers().then(() => {
-        console.log('⏰ OS schedulers started: alarms + daily briefs');
-      }).catch((err) => {
-        console.error('⚠️ Scheduler startup failed:', err);
-      });
-    });
-    
+
+    console.log(`✅ Running at ${process.env.BACKEND_PUBLIC_URL || `http://localhost:${port}`}`);
+    console.log('📖 Docs: /docs | 🩺 Health: /health | ⏰ Schedulers active');
+    setImmediate(() => bootstrapSchedulers().catch(console.error));
   } catch (err) {
     console.error('❌ Server startup failed:', err);
     process.exit(1);
