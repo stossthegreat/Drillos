@@ -158,10 +158,28 @@ class _NewHabitsScreenState extends State<NewHabitsScreen> with TickerProviderSt
         dynamic created;
         
         if (data['type'] == 'task') {
-          // CREATE TASK
+          // CREATE TASK (with scheduling support)
+          Map<String, dynamic> schedule = {
+            'type': data['frequency'] ?? 'daily',
+          };
+          
+          // Add schedule-specific data for tasks
+          if (data['frequency'] == 'everyN' && data['everyN'] != null) {
+            schedule['everyN'] = data['everyN'];
+            schedule['startDate'] = DateTime.now().toIso8601String().split('T')[0];
+          } else if (data['frequency'] == 'custom') {
+            if (data['startDate'] != null) {
+              schedule['startDate'] = data['startDate'];
+            }
+            if (data['endDate'] != null) {
+              schedule['endDate'] = data['endDate'];
+            }
+          }
+          
           created = await apiClient.createTask({
             'title': data['name'].toString().trim(),
             'description': data['category'] ?? '',
+            'schedule': schedule,
             // Ensure RFC3339 date-time with seconds and Z
             'dueDate': (data['endDate'] != null && data['endDate'].toString().isNotEmpty)
                 ? DateTime.parse(data['endDate']).toUtc().toIso8601String()
@@ -199,34 +217,61 @@ class _NewHabitsScreenState extends State<NewHabitsScreen> with TickerProviderSt
           Toast.show(context, '✅ Task created!');
           
         } else {
-          // CREATE HABIT (existing logic)
+          // CREATE HABIT (with proper scheduling)
+          Map<String, dynamic> schedule = {
+            'type': data['frequency'] ?? 'daily',
+          };
+          
+          // Add schedule-specific data
+          if (data['frequency'] == 'everyN' && data['everyN'] != null) {
+            schedule['everyN'] = data['everyN'];
+            schedule['startDate'] = DateTime.now().toIso8601String().split('T')[0];
+          } else if (data['frequency'] == 'custom') {
+            if (data['startDate'] != null) {
+              schedule['startDate'] = data['startDate'];
+            }
+            if (data['endDate'] != null) {
+              schedule['endDate'] = data['endDate'];
+            }
+          }
+          
           created = await apiClient.createHabit({
             'title': data['name'].toString().trim(),
-            'schedule': { 'type': 'daily' },
+            'schedule': schedule,
             'context': { 'difficulty': data['intensity'] },
             'color': data['color'],
             'reminderEnabled': data['reminderOn'],
             'reminderTime': data['reminderTime'],
           });
           
-          // Create alarm for habit reminder
+          // Create alarm for habit reminder (respects schedule)
           if (data['reminderOn'] == true && data['reminderTime'] != null) {
             try {
               final timeParts = data['reminderTime'].toString().split(':');
               final hour = int.parse(timeParts[0]);
               final minute = int.parse(timeParts[1]);
               
+              // Generate appropriate RRULE based on schedule
+              String rrule = 'FREQ=DAILY;BYHOUR=$hour;BYMINUTE=$minute';
+              if (data['frequency'] == 'weekdays') {
+                rrule = 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;BYHOUR=$hour;BYMINUTE=$minute';
+              } else if (data['frequency'] == 'everyN' && data['everyN'] != null) {
+                // For everyN, we'll use daily but the backend will handle the logic
+                rrule = 'FREQ=DAILY;BYHOUR=$hour;BYMINUTE=$minute';
+              }
+              
               await apiClient.createAlarm({
                 'label': 'Habit: ${data['name'].toString().trim()}',
-                'rrule': 'FREQ=DAILY;BYHOUR=$hour;BYMINUTE=$minute',
+                'rrule': rrule,
                 'tone': data['intensity'] == 3 ? 'strict' : data['intensity'] == 2 ? 'balanced' : 'light',
                 'metadata': {
                   'type': 'habit_reminder',
                   'habitId': created['id'],
                   'habitName': data['name'].toString().trim(),
+                  'schedule': schedule, // Include schedule info for backend processing
                 }
               });
-              print('✅ Created alarm for habit reminder');
+              print('✅ Created alarm for habit reminder with schedule: ${data['frequency']}');
             } catch (e) {
               print('❌ Error creating habit alarm: $e');
             }

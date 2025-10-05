@@ -6,6 +6,12 @@ type CreateTaskInput = {
   title: string;
   description?: string;
   dueDate?: Date;
+  schedule?: {
+    type: "daily" | "weekdays" | "everyN" | "custom";
+    everyN?: number;
+    startDate?: string;
+    endDate?: string;
+  };
   priority?: number;
   category?: string;
 };
@@ -48,12 +54,27 @@ export class TasksService {
         title: input.title,
         description: input.description,
         dueDate: input.dueDate,
+        schedule: input.schedule ?? { type: "daily" },
         priority: input.priority ?? 2,
         category: input.category ?? "general",
       },
     });
 
     await this.logEvent(userId, "task_created", { taskId: task.id, title: task.title });
+
+    // Auto-select if today matches the schedule
+    if (this.isScheduledToday(task.schedule)) {
+      try {
+        const existing = await prisma.todaySelection.findFirst({
+          where: { userId, taskId: task.id, date: this.dayKey(new Date()) },
+        });
+        if (!existing) {
+          await todayService.selectForToday(userId, undefined, task.id);
+        }
+      } catch (e) {
+        console.warn("⚠️ Auto-select task skipped:", e);
+      }
+    }
 
     // ✅ Auto-select if due today or no dueDate
     const isToday =
@@ -130,6 +151,36 @@ export class TasksService {
 
   private async logEvent(userId: string, type: string, payload: any) {
     await prisma.event.create({ data: { userId, type, payload } });
+  }
+
+  private isScheduledToday(schedule: any): boolean {
+    if (!schedule || !schedule.type) return true;
+    const today = new Date();
+    const day = today.getDay();
+
+    switch (schedule.type) {
+      case "daily":
+        return true;
+      case "weekdays":
+        return day >= 1 && day <= 5;
+      case "everyN":
+        if (!schedule.startDate || !schedule.everyN) return true;
+        const start = new Date(schedule.startDate);
+        const diffDays = Math.floor(
+          (today.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)
+        );
+        return diffDays % schedule.everyN === 0;
+      case "custom":
+        if (schedule.startDate && today < new Date(schedule.startDate)) return false;
+        if (schedule.endDate && today > new Date(schedule.endDate)) return false;
+        return true;
+      default:
+        return true;
+    }
+  }
+
+  private dayKey(d: Date) {
+    return d.toISOString().split("T")[0];
   }
 }
 

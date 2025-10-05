@@ -12,7 +12,7 @@ yarn-error.log*
 .env.production.local
 
 # Build output
-dist/
+# dist/  # Commented out - needed for Railway deployment
 build/
 
 # Logs

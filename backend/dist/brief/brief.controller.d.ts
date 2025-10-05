@@ -1,0 +1,3 @@
+import { FastifyInstance, FastifyPluginOptions } from 'fastify';
+export default function briefRoutes(fastify: FastifyInstance, _opts: FastifyPluginOptions): Promise<void>;
+//# sourceMappingURL=brief.controller.d.ts.map

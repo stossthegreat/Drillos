@@ -124,6 +124,7 @@ model Task {
   title       String
   description String?
   dueDate     DateTime?
+  schedule    Json      @default("{}")
   priority    Int       @default(1)
   category    String?
   completed   Boolean   @default(false)
