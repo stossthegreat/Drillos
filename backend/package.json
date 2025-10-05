@@ -5,17 +5,13 @@
   "main": "dist/server.js",
   "scripts": {
     "dev": "nodemon --watch 'src/**/*.ts' --exec ts-node src/server.ts",
-    "build": "tsc && prisma generate",
+    "build": "tsc && prisma generate && mkdir -p dist/workers && cp src/workers/*.ts dist/workers/ || true",
     "start": "node dist/server.js",
-    "worker": "node dist/workers/scheduler.worker.js",
-    "postinstall": "prisma generate",
+    "start:worker": "node dist/workers/scheduler.worker.js",
+    "postinstall": "npm run build",
     "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate deploy",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "prisma:migrate": "prisma migrate deploy"
   },
-  "keywords": [],
-  "author": "DrillOS Team",
-  "license": "ISC",
   "dependencies": {
     "@aws-sdk/client-s3": "^3.899.0",
     "@fastify/cors": "^11.1.0",
@@ -29,7 +25,6 @@
     "firebase-admin": "^13.5.0",
     "form-data": "^4.0.4",
     "ioredis": "^5.8.0",
-    "node-cron": "^4.2.1",
     "openai": "^6.0.0",
     "pino": "^9.13.0",
     "pino-pretty": "^13.1.1",
