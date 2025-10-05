@@ -1,4 +1,3 @@
-// src/jobs/scheduler.ts
 import { Queue, Worker } from "bullmq";
 import { redis } from "../utils/redis";
 import { prisma } from "../utils/db";
@@ -6,41 +5,40 @@ import { alarmsService } from "../services/alarms.service";
 import { notificationsService } from "../services/notifications.service";
 import { aiService } from "../services/ai.service";
 import { voiceService } from "../services/voice.service";
-import { nudgesService } from "../services/nudges.service";
-import { briefService } from "../services/brief.service";
 
 export const schedulerQueue = new Queue("scheduler", { connection: redis });
 
-export async function bootstrapSchedulers() {
-  console.log("⏰ Bootstrapping OS schedulers...");
+type MentorId = "marcus" | "drill" | "buddha" | "lincoln" | "confucius";
 
+/**
+ * Boot the repeatable background jobs for DrillOS
+ */
+export async function bootstrapSchedulers() {
+  // scan alarms every minute
   await schedulerQueue.add(
     "scan-alarms",
     {},
     { repeat: { every: 60_000 }, removeOnComplete: true, removeOnFail: true }
   );
 
+  // re-ensure daily briefs hourly
   await schedulerQueue.add(
     "ensure-daily-briefs",
     {},
     { repeat: { every: 60 * 60_000 }, removeOnComplete: true, removeOnFail: true }
   );
 
+  // re-ensure random nudges hourly
   await schedulerQueue.add(
-    "ensure-evening-debriefs",
+    "ensure-random-nudges",
     {},
     { repeat: { every: 60 * 60_000 }, removeOnComplete: true, removeOnFail: true }
   );
-
-  await schedulerQueue.add(
-    "auto-nudges-hourly",
-    {},
-    { repeat: { every: 60 * 60_000 }, removeOnComplete: true, removeOnFail: true }
-  );
-
-  console.log("✅ OS schedulers started (alarms, briefs, nudges, debriefs)");
 }
 
+/**
+ * Main worker
+ */
 new Worker(
   "scheduler",
   async (job) => {
@@ -49,14 +47,12 @@ new Worker(
         return scanDueAlarms();
       case "ensure-daily-briefs":
         return ensureDailyBriefJobs();
-      case "ensure-evening-debriefs":
-        return ensureEveningDebriefJobs();
-      case "auto-nudges-hourly":
-        return autoNudgesHourly();
+      case "ensure-random-nudges":
+        return ensureRandomNudgeJobs();
       case "daily-brief":
         return runDailyBrief(job.data.userId);
-      case "evening-debrief":
-        return runEveningDebrief(job.data.userId);
+      case "random-nudge":
+        return runRandomNudge(job.data.userId);
       default:
         return;
     }
@@ -64,94 +60,177 @@ new Worker(
   { connection: redis }
 );
 
-// === TASKS ===
-
+/* ======================
+   1️⃣ Scan Due Alarms
+   ====================== */
 async function scanDueAlarms() {
   const now = new Date();
-  const due = await prisma.alarm.findMany({ where: { enabled: true, nextRun: { lte: now } } });
+  const due = await prisma.alarm.findMany({
+    where: { enabled: true, nextRun: { lte: now } },
+  });
+
   for (const alarm of due) {
     try {
       await alarmsService.markFired(alarm.id, alarm.userId);
+
       const user = await prisma.user.findUnique({ where: { id: alarm.userId } });
       if (!user) continue;
 
-      const mentor = user.mentorId || "marcus";
-      const text = await aiService.generateMentorReply(
-        user.id,
-        mentor,
-        `Alarm fired: ${alarm.label}. Give one command.`
-      );
+      const isPro = user.plan === "PRO";
+      const mentor = ((user as any)?.mentorId || "marcus") as MentorId;
+
+      let text = `${alarm.label}`;
+      if (isPro) {
+        text = await aiService.generateMentorReply(
+          alarm.userId,
+          mentor,
+          `Alarm fired: ${alarm.label}`,
+          { purpose: "alarm", maxChars: 220, temperature: 0.4 }
+        );
+      }
 
       let audioUrl: string | null = null;
       try {
-        audioUrl = await voiceService.ttsToUrl(user.id, text, mentor);
-      } catch {}
+        audioUrl = await voiceService.ttsToUrl(alarm.userId, text, mentor);
+      } catch {
+        audioUrl = null;
+      }
 
       await prisma.event.create({
         data: {
-          userId: user.id,
+          userId: alarm.userId,
           type: "alarm_fired_os",
           payload: { alarmId: alarm.id, label: alarm.label, text, audioUrl },
         },
       });
 
-      await notificationsService.send(user.id, alarm.label, text);
+      const body = text.length > 180 ? text.slice(0, 177) + "…" : text;
+      await notificationsService.send(alarm.userId, alarm.label, body);
     } catch (e) {
-      console.error("Alarm error", e);
+      await prisma.event.create({
+        data: {
+          userId: alarm.userId,
+          type: "alarm_error",
+          payload: { alarmId: alarm.id, message: (e as Error).message },
+        },
+      });
     }
   }
+
+  return { ok: true, processed: due.length };
 }
 
+/* ============================
+   2️⃣ Daily Briefs (07:00)
+   ============================ */
 async function ensureDailyBriefJobs() {
-  const users = await prisma.user.findMany({ select: { id: true, tz: true } });
+  const users = await prisma.user.findMany({
+    select: { id: true, tz: true, briefsEnabled: true, plan: true },
+  });
+
   for (const u of users) {
+    if (!(u.briefsEnabled && u.plan === "PRO")) continue;
+
+    const tz = u.tz || "Europe/London";
     await schedulerQueue.add(
       "daily-brief",
       { userId: u.id },
       {
-        repeat: { pattern: "0 7 * * *", tz: u.tz || "Europe/London" },
+        repeat: { pattern: "0 7 * * *", tz },
         jobId: `daily-brief:${u.id}`,
         removeOnComplete: true,
         removeOnFail: true,
       }
     );
   }
-}
-
-async function ensureEveningDebriefJobs() {
-  const users = await prisma.user.findMany({ select: { id: true, tz: true } });
-  for (const u of users) {
-    await schedulerQueue.add(
-      "evening-debrief",
-      { userId: u.id },
-      {
-        repeat: { pattern: "0 21 * * *", tz: u.tz || "Europe/London" },
-        jobId: `evening-debrief:${u.id}`,
-        removeOnComplete: true,
-        removeOnFail: true,
-      }
-    );
-  }
-}
-
-async function autoNudgesHourly() {
-  const users = await prisma.user.findMany({ select: { id: true, plan: true } });
-  for (const u of users) {
-    try {
-      const nudges = await nudgesService.generateNudges(u.id);
-      if (nudges.length) {
-        await notificationsService.send(u.id, "Nudge", nudges[0].message);
-      }
-    } catch (e) {
-      console.error("nudge err", e);
-    }
-  }
+  return { ok: true, users: users.length };
 }
 
 async function runDailyBrief(userId: string) {
-  await briefService.getTodaysBrief(userId);
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user || !(user.plan === "PRO" && user.briefsEnabled)) return;
+
+  const mentor = ((user as any)?.mentorId || "marcus") as MentorId;
+  const text = await aiService.generateMorningBrief(userId, mentor);
+
+  let audioUrl: string | null = null;
+  try {
+    audioUrl = await voiceService.ttsToUrl(userId, text, mentor);
+  } catch {
+    audioUrl = null;
+  }
+
+  await prisma.event.create({
+    data: { userId, type: "morning_brief", payload: { text, audioUrl } },
+  });
+
+  await notificationsService.send(
+    userId,
+    "Morning Brief",
+    text.length > 180 ? text.slice(0, 177) + "…" : text
+  );
+
+  return { ok: true };
 }
 
-async function runEveningDebrief(userId: string) {
-  await briefService.getEveningDebrief(userId);
+/* ============================
+   3️⃣ Random Nudges (10–18h)
+   ============================ */
+async function ensureRandomNudgeJobs() {
+  const users = await prisma.user.findMany({
+    select: { id: true, tz: true, nudgesEnabled: true, plan: true },
+  });
+
+  for (const u of users) {
+    if (!(u.nudgesEnabled && u.plan === "PRO")) continue;
+
+    const tz = u.tz || "UTC";
+    const count = 2 + Math.floor(Math.random() * 2); // 2–3 per day
+
+    for (let i = 0; i < count; i++) {
+      const hour = 10 + Math.floor(Math.random() * 9); // 10–18
+      const minute = Math.floor(Math.random() * 60);
+      const cron = `${minute} ${hour} * * *`;
+
+      await schedulerQueue.add(
+        "random-nudge",
+        { userId: u.id },
+        {
+          repeat: { pattern: cron, tz },
+          jobId: `nudge:${u.id}:${i}`,
+          removeOnComplete: true,
+          removeOnFail: true,
+        }
+      );
+    }
+  }
+  return { ok: true };
+}
+
+async function runRandomNudge(userId: string) {
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user || !(user.plan === "PRO" && user.nudgesEnabled)) return;
+
+  const mentor = ((user as any)?.mentorId || "marcus") as MentorId;
+  const reason = "mid-day accountability";
+  const text = await aiService.generateNudge(userId, mentor, reason);
+
+  let audioUrl: string | null = null;
+  try {
+    audioUrl = await voiceService.ttsToUrl(userId, text, mentor);
+  } catch {
+    audioUrl = null;
+  }
+
+  await prisma.event.create({
+    data: { userId, type: "mentor_nudge", payload: { text, audioUrl } },
+  });
+
+  await notificationsService.send(
+    userId,
+    "Nudge",
+    text.length > 180 ? text.slice(0, 177) + "…" : text
+  );
+
+  return { ok: true };
 }
