@@ -27,6 +27,7 @@ const ai_controller_1 = __importDefault(require("./controllers/ai.controller"));
 const user_controller_1 = require("./controllers/user.controller");
 // schedulers
 const scheduler_1 = require("./jobs/scheduler");
+require("./workers/scheduler.worker"); // ⚡ Import worker to instantiate it
 // load .env
 dotenv_1.default.config();
 // ✅ Validate env vars before boot

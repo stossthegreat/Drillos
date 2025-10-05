@@ -545,32 +545,30 @@ class _HabitCreateEditModalState extends State<HabitCreateEditModal> with Single
                               ),
                               const SizedBox(height: 16),
                               
-                              // Frequency (hide for tasks)
-                              if (_formData['type'] != 'task') ...[
-                                Row(
-                                  children: [
+                              // Frequency (now available for ALL types!)
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: _buildDropdown(
+                                      label: 'Repeat',
+                                      value: _formData['frequency'] ?? 'daily',
+                                      options: ['daily', 'weekdays', 'everyN', 'custom'],
+                                      onChanged: (value) => _updateFormData('frequency', value),
+                                    ),
+                                  ),
+                                  if (_formData['frequency'] == 'everyN') ...[
+                                    const SizedBox(width: 12),
                                     Expanded(
-                                      child: _buildDropdown(
-                                        label: 'Repeat',
-                                        value: _formData['frequency'] ?? 'daily',
-                                        options: ['daily', 'weekdays', 'everyN'],
-                                        onChanged: (value) => _updateFormData('frequency', value),
+                                      child: _buildTextField(
+                                        label: 'Every N days',
+                                        controller: _everyNController,
+                                        keyboardType: TextInputType.number,
                                       ),
                                     ),
-                                    if (_formData['frequency'] == 'everyN') ...[
-                                      const SizedBox(width: 12),
-                                      Expanded(
-                                        child: _buildTextField(
-                                          label: 'Every N days',
-                                          controller: _everyNController,
-                                          keyboardType: TextInputType.number,
-                                        ),
-                                      ),
-                                    ],
                                   ],
-                                ),
-                                const SizedBox(height: 16),
-                              ],
+                                ],
+                              ),
+                              const SizedBox(height: 16),
                               
                               // Intensity
                               _buildIntensitySelector(),

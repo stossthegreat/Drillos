@@ -25,6 +25,7 @@ import { userController } from './controllers/user.controller';
 
 // schedulers
 import { bootstrapSchedulers } from './jobs/scheduler';
+import './workers/scheduler.worker'; // ⚡ Import worker to instantiate it
 
 // load .env
 dotenv.config();
