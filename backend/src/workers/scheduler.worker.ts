@@ -49,6 +49,8 @@ new Worker(
         return runDailyBrief(job.data.userId);
       case "auto-nudges-hourly":
         return autoNudgesHourly();
+      case "ensure-random-nudges":
+        return autoNudgesHourly(); // Same as auto-nudges-hourly
       case "ensure-evening-debriefs":
         return ensureEveningDebriefJobs();
       case "evening-debrief":
@@ -59,6 +61,8 @@ new Worker(
   },
   { connection: redis }
 );
+
+console.log("🔧 Scheduler worker initialized and listening for jobs...");
 
 /* =========================
    Alarm Handling
@@ -157,11 +161,11 @@ async function autoNudgesHourly() {
     if (!(await canUseLLM(u.id, plan))) continue;
 
     const mentor = (await prisma.user.findUnique({ where: { id: u.id } }))?.mentorId || "marcus";
-    const nudges = await nudgesService.generateNudges(u.id);
+    const result = await nudgesService.generateNudges(u.id);
     await incLLM(u.id);
 
-    if (!nudges.length) continue;
-    const nudge = nudges[0];
+    if (!result.success || !result.nudges || result.nudges.length === 0) continue;
+    const nudge = result.nudges[0];
     await notificationsService.send(u.id, "Nudge", nudge.message.slice(0, 180));
   }
   return { ok: true };

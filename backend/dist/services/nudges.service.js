@@ -37,7 +37,7 @@ class NudgesService {
         const openai = getOpenAIClient();
         if (!openai) {
             console.warn('⚠️ OpenAI not available, skipping nudge generation');
-            return [];
+            return { success: false, nudges: [] };
         }
         const user = await db_1.prisma.user.findUnique({ where: { id: userId } });
         if (!user)
@@ -100,7 +100,7 @@ Tone: ${mentor.style}, no fluff, straight orders.
                 data: { userId, type: "nudge_generated", payload: nudge },
             });
         }
-        return nudges;
+        return { success: true, nudges, mentor: mentorId };
     }
 }
 exports.NudgesService = NudgesService;

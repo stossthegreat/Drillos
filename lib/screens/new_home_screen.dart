@@ -161,17 +161,21 @@ class _NewHomeScreenState extends State<NewHomeScreen> with TickerProviderStateM
         print('📋 Today items built: ${today.length} total');
       }
       
-      setState(() {
-        briefData = briefResult;
-        todayItems = today;
-        currentNudge = nudgeResult;
-        isLoading = false;
-      });
-      
-      _progressController.forward();
+      if (mounted) {
+        setState(() {
+          briefData = briefResult;
+          todayItems = today;
+          currentNudge = nudgeResult;
+          isLoading = false;
+        });
+        
+        _progressController.forward();
+      }
     } catch (e) {
       print('❌ Error loading data: $e');
-      setState(() => isLoading = false);
+      if (mounted) {
+        setState(() => isLoading = false);
+      }
     }
   }
 
