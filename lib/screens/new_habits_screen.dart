@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_client.dart';
 import '../design/feedback.dart';
 import '../widgets/habit_create_edit_modal.dart';
 import '../logic/habit_engine.dart';
+import '../utils/schedule.dart';
 
 class NewHabitsScreen extends StatefulWidget {
   const NewHabitsScreen({super.key});
@@ -162,6 +164,20 @@ class _NewHabitsScreenState extends State<NewHabitsScreen> with TickerProviderSt
     } catch (e) {
       print('❌ Error toggling completion: $e');
     }
+  }
+
+  // ✅ PHASE 2: Get completion data for the week from SharedPreferences
+  Future<Map<String, bool>> _getWeekCompletionData(String habitId, List<DateTime> dates) async {
+    final prefs = await SharedPreferences.getInstance();
+    final completionData = <String, bool>{};
+    
+    for (final date in dates) {
+      final dateKey = formatDate(date);
+      final storageKey = 'done:$habitId:$dateKey';
+      completionData[dateKey] = prefs.getBool(storageKey) ?? false;
+    }
+    
+    return completionData;
   }
 
   Future<void> _saveItem(Map<String, dynamic> data) async {
@@ -681,42 +697,55 @@ class _NewHabitsScreenState extends State<NewHabitsScreen> with TickerProviderSt
           
           const SizedBox(height: 12),
           
-          // Week completion rail
-          Row(
-            children: weekDates.map((date) {
-              final isCompleted = false; // Would check completion for this date
-              final isScheduled = true; // Would check if scheduled for this date
+          // Week completion rail with accurate schedule checking
+          FutureBuilder<Map<String, bool>>(
+            future: _getWeekCompletionData(item['id'].toString(), weekDates),
+            builder: (context, snapshot) {
+              final completionData = snapshot.data ?? {};
               
-              return Expanded(
-                child: GestureDetector(
-                  onTap: () => _toggleCompletion(item['id'].toString(), date),
-                  child: Container(
-                    margin: const EdgeInsets.symmetric(horizontal: 2),
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: isCompleted ? const Color(0xFF10B981) : Colors.transparent,
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(
-                        color: isCompleted ? const Color(0xFF10B981) :
-                               isScheduled ? Colors.white.withOpacity(0.2) :
-                               Colors.white.withOpacity(0.1),
-                        width: 2,
-                      ),
-                    ),
-                    child: Center(
-                      child: Text(
-                        '${date.day}',
-                        style: TextStyle(
-                          color: isCompleted ? Colors.black : Colors.white,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
+              return Row(
+                children: weekDates.map((date) {
+                  final dateKey = formatDate(date);
+                  final isCompleted = completionData[dateKey] ?? false;
+                  
+                  // ✅ PHASE 2: Check if habit is actually scheduled for this date
+                  final schedule = HabitSchedule.fromJson((item['schedule'] as Map?)?.cast<String, dynamic>());
+                  final isScheduled = schedule.isActiveOn(date);
+                  
+                  return Expanded(
+                    child: GestureDetector(
+                      onTap: isScheduled ? () => _toggleCompletion(item['id'].toString(), date) : null,
+                      child: Container(
+                        margin: const EdgeInsets.symmetric(horizontal: 2),
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: isCompleted ? const Color(0xFF10B981) : Colors.transparent,
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: isCompleted ? const Color(0xFF10B981) :
+                                   isScheduled ? Colors.white.withOpacity(0.2) :
+                                   Colors.white.withOpacity(0.05), // Very faded for non-scheduled days
+                            width: 2,
+                          ),
+                        ),
+                        child: Center(
+                          child: Text(
+                            '${date.day}',
+                            style: TextStyle(
+                              color: isCompleted ? Colors.black : 
+                                     isScheduled ? Colors.white :
+                                     Colors.white.withOpacity(0.3), // Gray out non-scheduled days
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                ),
+                  );
+                }).toList(),
               );
-            }).toList(),
+            },
           ),
           
           if (itemType != 'task') ...[
