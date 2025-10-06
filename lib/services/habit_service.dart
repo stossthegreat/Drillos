@@ -223,38 +223,43 @@ class HabitService {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
 
+    Map<String, dynamic> schedule;
+    
     if (frequency == 'daily') {
-      return {
+      schedule = {
         'startDate': data['startDate'] ?? today.toIso8601String(),
         'endDate': data['endDate'],
         'daysOfWeek': [1, 2, 3, 4, 5, 6, 7],
       };
     } else if (frequency == 'weekdays') {
-      return {
+      schedule = {
         'startDate': data['startDate'] ?? today.toIso8601String(),
         'endDate': data['endDate'],
         'daysOfWeek': [1, 2, 3, 4, 5],
       };
     } else if (frequency == 'weekends') {
-      return {
+      schedule = {
         'startDate': data['startDate'] ?? today.toIso8601String(),
         'endDate': data['endDate'],
         'daysOfWeek': [6, 7],
       };
     } else if (frequency == 'custom' && data['daysOfWeek'] != null) {
-      return {
+      schedule = {
         'startDate': data['startDate'] ?? today.toIso8601String(),
         'endDate': data['endDate'],
         'daysOfWeek': data['daysOfWeek'],
       };
     } else {
       // Default to daily
-      return {
+      schedule = {
         'startDate': data['startDate'] ?? today.toIso8601String(),
         'endDate': data['endDate'],
         'daysOfWeek': [1, 2, 3, 4, 5, 6, 7],
       };
     }
+    
+    print('📅 Built schedule: frequency=$frequency, daysOfWeek=${schedule['daysOfWeek']}');
+    return schedule;
   }
 
   bool _isActiveOn(Map<String, dynamic> schedule, DateTime date) {
@@ -276,8 +281,34 @@ class HabitService {
       if (d.isAfter(e)) return false;
     }
     
-    // Check days of week
-    final daysOfWeek = (schedule['daysOfWeek'] as List?)?.cast<int>() ?? [1, 2, 3, 4, 5, 6, 7];
+    // ✅ FIX: Robust parsing of daysOfWeek from JSON
+    final rawDays = schedule['daysOfWeek'];
+    final daysOfWeek = <int>[];
+    
+    if (rawDays is List) {
+      for (final day in rawDays) {
+        if (day is int && day >= 1 && day <= 7) {
+          daysOfWeek.add(day);
+        } else if (day is String) {
+          final parsed = int.tryParse(day);
+          if (parsed != null && parsed >= 1 && parsed <= 7) {
+            daysOfWeek.add(parsed);
+          }
+        } else if (day is num) {
+          final intDay = day.toInt();
+          if (intDay >= 1 && intDay <= 7) {
+            daysOfWeek.add(intDay);
+          }
+        }
+      }
+    }
+    
+    // Default to all days if empty
+    if (daysOfWeek.isEmpty) {
+      daysOfWeek.addAll([1, 2, 3, 4, 5, 6, 7]);
+    }
+    
+    print('🔍 Schedule check: date=${d.weekday}, daysOfWeek=$daysOfWeek, active=${daysOfWeek.contains(d.weekday)}');
     return daysOfWeek.contains(d.weekday);
   }
 

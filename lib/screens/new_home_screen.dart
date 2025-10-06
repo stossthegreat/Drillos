@@ -868,12 +868,25 @@ class _NewHomeScreenState extends State<NewHomeScreen> with TickerProviderStateM
         await apiClient.completeTask(item['id'].toString());
         await _loadData(); // Refresh for tasks
       } else {
-        // ✅ FIX: Use HabitEngine for local streak update (same as _toggleCompletion)
+        // ✅ FIX: Immediately mark as completed in UI BEFORE async operation
+        if (mounted) {
+          setState(() {
+            final index = todayItems.indexWhere((i) => i['id'] == item['id']);
+            if (index != -1) {
+              todayItems[index] = {
+                ...todayItems[index],
+                'completed': true,
+              };
+            }
+          });
+        }
+        
+        // Then update streak/XP in background
         await HabitEngine.applyLocalTick(
           habitId: item['id'].toString(),
           onApplied: (newStreak, newXp) {
             print('✅ Local tick applied: streak=$newStreak, xp=$newXp');
-            // Update UI immediately
+            // Update streak in UI
             if (mounted) {
               setState(() {
                 final index = todayItems.indexWhere((i) => i['id'] == item['id']);
