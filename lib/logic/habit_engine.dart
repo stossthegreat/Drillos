@@ -164,7 +164,7 @@ class HabitEngine {
       final streak = await storage.getStreak(habit['id']);
 
       todayHabits.add({
-        ...habit,
+        ...Map<String, dynamic>.from(habit),
         'completed': completed,
         'streak': streak,
       });
