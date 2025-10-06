@@ -1,547 +1,185 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter/foundation.dart';
+import '../utils/schedule.dart';
 
 class ApiClient {
-  String baseUrl;
-  String? _authToken;
-  String _userId = 'demo-user-123';
+  String _baseUrl = const String.fromEnvironment('API_BASE_URL', defaultValue: '');
 
-  ApiClient({String? baseUrl})
-      : baseUrl = baseUrl ?? const String.fromEnvironment('API_BASE_URL', defaultValue: 'https://drillos-production.up.railway.app');
+  static final ApiClient _singleton = ApiClient._internal();
+  factory ApiClient() => _singleton;
+  ApiClient._internal();
 
-  void setAuthToken(String token) {
-    _authToken = token;
-  }
-
-  void setUserId(String userId) {
-    _userId = userId.trim().isEmpty ? 'demo-user-123' : userId.trim();
-  }
+  String getBaseUrl() => _baseUrl.isNotEmpty ? _baseUrl : (kReleaseMode
+      ? 'https://drillos-production.up.railway.app'
+      : 'http://localhost:8080');
 
   void setBaseUrl(String url) {
-    var v = url.trim();
-    if (v.endsWith('/')) v = v.substring(0, v.length - 1);
-    if (!v.startsWith('http://') && !v.startsWith('https://')) {
-      v = 'https://$v';
-    }
-    baseUrl = v;
+    _baseUrl = url;
   }
 
-  String getBaseUrl() => baseUrl;
-
-  // Health check for debugging
-  Future<Map<String, dynamic>> healthCheck() async {
-    print('🏥 Health check starting...');
-    print('🏥 Testing URL: $baseUrl/health');
-    
-    try {
-      final response = await http.get(
-        Uri.parse('$baseUrl/health'),
-        headers: {'Content-Type': 'application/json'},
-      );
-      
-      print('🏥 Health check status: ${response.statusCode}');
-      print('🏥 Health check body: ${response.body}');
-      
-      if (response.statusCode == 200) {
-        return {'status': 'ok', 'body': response.body};
-      } else {
-        return {'status': 'error', 'code': response.statusCode, 'body': response.body};
-      }
-    } catch (e) {
-      print('🏥 ❌ Health check failed: $e');
-      return {'status': 'exception', 'error': e.toString()};
-    }
-  }
-
-  Map<String, String> get _headers => {
+  Map<String, String> _headers() => {
     'Content-Type': 'application/json',
-    'x-user-id': _userId,
-    if (_authToken != null) 'Authorization': 'Bearer $_authToken',
+    'x-user-id': 'demo-user-123',
   };
 
-  // ============ AUTH ============
-  Future<Map<String, dynamic>> verifyToken(String idToken) async {
-    final response = await http.post(
-      Uri.parse('$baseUrl/v1/auth/verifyToken'),
-      headers: _headers,
-      body: json.encode({'idToken': idToken}),
-    );
-    
-    if (response.statusCode == 200) {
-      return json.decode(response.body);
-    } else {
-      throw Exception('Token verification failed: ${response.body}');
+  // ---- HABITS (CRUD kept the same shape) ----
+
+  Future<List<Map<String, dynamic>>> listHabits() async {
+    final url = Uri.parse('${getBaseUrl()}/api/v1/habits');
+    final r = await http.get(url, headers: _headers());
+    if (r.statusCode != 200) throw Exception('failed listHabits');
+    final decoded = jsonDecode(r.body);
+    if (decoded is List) {
+      return decoded.map<Map<String, dynamic>>((e) => Map<String, dynamic>.from(e)).toList();
     }
+    return [];
   }
 
-  // ============ USERS ============
-  Future<Map<String, dynamic>> getMe() async {
-    final response = await http.get(
-      Uri.parse('$baseUrl/api/v1/users/me'),
-      headers: _headers,
-    );
-    
-    if (response.statusCode == 200) {
-      return json.decode(response.body);
-    } else {
-      throw Exception('Failed to get user: ${response.body}');
-    }
+  Future<Map<String, dynamic>> createHabit(Map<String, dynamic> data) async {
+    final url = Uri.parse('${getBaseUrl()}/api/v1/habits');
+    final r = await http.post(url, headers: _headers(), body: jsonEncode(data));
+    if (r.statusCode != 201) throw Exception('failed createHabit');
+    return Map<String, dynamic>.from(jsonDecode(r.body));
   }
 
-  Future<Map<String, dynamic>> updateMe(Map<String, dynamic> updates) async {
-    final response = await http.patch(
-      Uri.parse('$baseUrl/api/v1/users/me'),
-      headers: _headers,
-      body: json.encode(updates),
-    );
-    
-    if (response.statusCode == 200) {
-      return json.decode(response.body);
-    } else {
-      throw Exception('Failed to update user: ${response.body}');
-    }
+  Future<Map<String, dynamic>> updateHabit(String id, Map<String, dynamic> data) async {
+    final url = Uri.parse('${getBaseUrl()}/api/v1/habits/$id');
+    final r = await http.put(url, headers: _headers(), body: jsonEncode(data));
+    if (r.statusCode != 200) throw Exception('failed updateHabit');
+    return Map<String, dynamic>.from(jsonDecode(r.body));
   }
 
-  // ============ BRIEF ============
+  Future<bool> deleteHabit(String id) async {
+    final url = Uri.parse('${getBaseUrl()}/api/v1/habits/$id');
+    final r = await http.delete(url, headers: _headers());
+    return r.statusCode == 200;
+  }
+
+  // ---- TICK (fire-and-forget for UI speed) ----
+
+  Future<void> tickHabit(String id, {DateTime? when}) async {
+    // non-blocking: don't await in UI
+    final url = Uri.parse('${getBaseUrl()}/api/v1/habits/$id/tick');
+    unawaited(http.post(
+      url,
+      headers: _headers(),
+      body: jsonEncode({
+        if (when != null) 'date': when.toIso8601String(),
+      }),
+    ));
+    // Local streak/XP update should be handled by the screen immediately.
+  }
+
+  // ---- BRIEF / NUDGE ----
+
+  Future<Map<String, dynamic>> getBrief() async {
+    final url = Uri.parse('${getBaseUrl()}/api/v1/brief/today');
+    final r = await http.get(url, headers: _headers());
+    if (r.statusCode != 200) return {};
+    final d = jsonDecode(r.body);
+    return (d is Map<String, dynamic>) ? d : {};
+  }
+
+  Future<Map<String, dynamic>> getNudge() async {
+    final url = Uri.parse('${getBaseUrl()}/api/v1/nudges/one');
+    final r = await http.get(url, headers: _headers());
+    if (r.statusCode != 200) throw Exception('Failed to fetch nudge');
+    final decoded = jsonDecode(r.body);
+    if (decoded is List && decoded.isNotEmpty && decoded.first is Map<String, dynamic>) {
+      return Map<String, dynamic>.from(decoded.first);
+    }
+    if (decoded is Map<String, dynamic>) {
+      return decoded;
+    }
+    return {};
+  }
+
+  // ---- "Today" helper: filter by schedule on client ----
+
+  Future<List<Map<String, dynamic>>> getTodayItems() async {
+    final habits = await listHabits();
+    final now = DateTime.now();
+    final today = <Map<String, dynamic>>[];
+
+    for (final h in habits) {
+      final sched = HabitSchedule.fromJson((h['schedule'] as Map?)?.cast<String, dynamic>());
+      final active = sched.isActiveOn(now);
+      if (!active) continue;
+
+      // shape compatible with existing UI:
+      today.add({
+        'id': h['id'],
+        'name': h['title'] ?? h['name'] ?? '',
+        'type': 'habit',
+        'completed': await _isCompletedToday(h['id']),
+        'streak': await _streakFor(h['id']),
+        'color': h['color'] ?? 'emerald',
+        'schedule': h['schedule'] ?? {}
+      });
+    }
+
+    return today;
+  }
+
+  // ---- Local streak/XP store (SharedPreferences) ----
+
+  Future<int> _streakFor(String habitId) async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt('streak:$habitId') ?? 0;
+    // Streak increments should be handled by screen logic when tick happens.
+  }
+
+  Future<bool> _isCompletedToday(String habitId) async {
+    final prefs = await SharedPreferences.getInstance();
+    final key = 'done:$habitId:${_ymd(DateTime.now())}';
+    return prefs.getBool(key) ?? false;
+  }
+
+  static String _ymd(DateTime d) => '${d.year}-${d.month}-${d.day}';
+
+  // ---- LEGACY METHODS (keep for compatibility) ----
+
   Future<Map<String, dynamic>> getBriefToday() async {
-    final response = await http.get(
-      Uri.parse('$baseUrl/v1/brief/test'),
-      headers: _headers,
-    );
-    if (response.statusCode == 200) {
-      return json.decode(response.body);
-    } else {
-      throw Exception('Failed to get brief: ${response.statusCode} ${response.body}');
-    }
+    return getBrief();
   }
 
-  Future<Map<String, dynamic>> selectForToday(String habitId, {String? date}) async {
-    final response = await http.post(
-      Uri.parse('$baseUrl/v1/brief/today/select'),
-      headers: _headers,
-      body: json.encode({
-        'habitId': habitId,
-        if (date != null) 'date': date,
-      }),
-    );
-    if (response.statusCode == 200 || response.statusCode == 201) {
-      return json.decode(response.body);
-    } else {
-      throw Exception('Failed to select for today: ${response.statusCode} ${response.body}');
-    }
-  }
-
-  Future<Map<String, dynamic>> deselectForToday(String habitId, {String? date}) async {
-    final response = await http.post(
-      Uri.parse('$baseUrl/v1/brief/today/deselect'),
-      headers: _headers,
-      body: json.encode({
-        'habitId': habitId,
-        if (date != null) 'date': date,
-      }),
-    );
-    if (response.statusCode == 200 || response.statusCode == 201) {
-      return json.decode(response.body);
-    } else {
-      throw Exception('Failed to deselect for today: ${response.statusCode} ${response.body}');
-    }
-  }
-
-  // ============ HABITS ============
   Future<List<dynamic>> getHabits() async {
-    final response = await http.get(
-      Uri.parse('$baseUrl/api/v1/habits'),
-      headers: _headers,
-    );
-    
-    if (response.statusCode == 200) {
-      return json.decode(response.body);
-    } else {
-      throw Exception('Failed to load habits: ${response.statusCode} ${response.body}');
-    }
+    return listHabits();
   }
 
-  Future<Map<String, dynamic>> createHabit(Map<String, dynamic> habitData) async {
-    final response = await http.post(
-      Uri.parse('$baseUrl/api/v1/habits'),
-      headers: _headers,
-      body: json.encode(habitData),
-    );
-    
-    if (response.statusCode == 200 || response.statusCode == 201) {
-      return json.decode(response.body);
-    } else {
-      throw Exception('Failed to create habit: ${response.statusCode} ${response.body}');
-    }
-  }
-
-  Future<Map<String, dynamic>> tickHabit(String habitId, {String? idempotencyKey}) async {
-    final headers = Map<String, String>.from(_headers);
-    if (idempotencyKey != null) {
-      headers['Idempotency-Key'] = idempotencyKey;
-    }
-
-    final response = await http.post(
-      Uri.parse('$baseUrl/api/v1/habits/$habitId/tick'),
-      headers: headers,
-      body: json.encode({}),
-    );
-    
-    if (response.statusCode == 200 || response.statusCode == 201) {
-      return json.decode(response.body);
-    } else {
-      throw Exception('Failed to tick habit: ${response.statusCode} ${response.body}');
-    }
-  }
-
-  // ============ CHAT ============
-  Future<Map<String, dynamic>> sendChatMessage(String message, {String mode = 'balanced', bool includeVoice = true}) async {
-    final response = await http.post(
-      Uri.parse('$baseUrl/v1/chat'),
-      headers: _headers,
-      body: json.encode({
-        'message': message,
-        'mode': mode,
-        'includeVoice': includeVoice,
-      }),
-    );
-    
-    if (response.statusCode == 200 || response.statusCode == 201) {
-      return json.decode(response.body);
-    } else {
-      throw Exception('Failed to send chat message: ${response.statusCode} ${response.body}');
-    }
-  }
-
-  // ============ VOICE ============
-  Future<Map<String, dynamic>> getVoicePreset(String presetId) async {
-    final response = await http.get(
-      Uri.parse('$baseUrl/v1/voice/preset/$presetId'),
-      headers: _headers,
-    );
-    
-    if (response.statusCode == 200) {
-      return json.decode(response.body);
-    } else {
-      throw Exception('Failed to get voice preset: ${response.statusCode} ${response.body}');
-    }
-  }
-
-  Future<Map<String, dynamic>> ttsVoice(String text, {String voice = 'balanced'}) async {
-    final response = await http.post(
-      Uri.parse('$baseUrl/v1/voice/tts'),
-      headers: _headers,
-      body: json.encode({
-        'text': text,
-        'voice': voice,
-      }),
-    );
-    
-    if (response.statusCode == 200) {
-      return json.decode(response.body);
-    } else if (response.statusCode == 402) {
-      throw Exception('TTS quota exceeded or PRO plan required');
-    } else {
-      throw Exception('Failed to generate TTS: ${response.statusCode} ${response.body}');
-    }
-  }
-
-  // ============ TASKS ============
   Future<List<dynamic>> getTasks() async {
-    final response = await http.get(
-      Uri.parse('$baseUrl/api/v1/tasks'),
-      headers: _headers,
-    );
-    
-    if (response.statusCode == 200) {
-      return json.decode(response.body);
-    } else {
-      throw Exception('Failed to load tasks: ${response.statusCode} ${response.body}');
-    }
+    final url = Uri.parse('${getBaseUrl()}/api/v1/tasks');
+    final r = await http.get(url, headers: _headers());
+    if (r.statusCode != 200) throw Exception('Failed to load tasks');
+    return jsonDecode(r.body);
   }
 
   Future<Map<String, dynamic>> createTask(Map<String, dynamic> taskData) async {
-    final response = await http.post(
-      Uri.parse('$baseUrl/api/v1/tasks'),
-      headers: _headers,
-      body: json.encode(taskData),
-    );
-    
-    if (response.statusCode == 200 || response.statusCode == 201) {
-      return json.decode(response.body);
-    } else {
-      throw Exception('Failed to create task: ${response.statusCode} ${response.body}');
-    }
+    final url = Uri.parse('${getBaseUrl()}/api/v1/tasks');
+    final r = await http.post(url, headers: _headers(), body: jsonEncode(taskData));
+    if (r.statusCode != 200 && r.statusCode != 201) throw Exception('Failed to create task');
+    return Map<String, dynamic>.from(jsonDecode(r.body));
   }
 
   Future<Map<String, dynamic>> completeTask(String taskId) async {
-    final response = await http.post(
-      Uri.parse('$baseUrl/api/v1/tasks/$taskId/complete'),
-      headers: _headers,
-      body: json.encode({}),
-    );
-    
-    if (response.statusCode == 200 || response.statusCode == 201) {
-      return json.decode(response.body);
-    } else {
-      throw Exception('Failed to complete task: ${response.statusCode} ${response.body}');
-    }
-  }
-
-  // ============ AI NUDGES ============
-  Future<Map<String, dynamic>> getNudge() async {
-    final response = await http.get(
-      Uri.parse('$baseUrl/api/v1/nudges'),
-      headers: _headers,
-    );
-    
-    if (response.statusCode == 200) {
-      return json.decode(response.body);
-    } else {
-      throw Exception('Failed to get nudge: ${response.statusCode} ${response.body}');
-    }
-  }
-
-  Future<Map<String, dynamic>> getWeeklyReport() async {
-    final response = await http.get(
-      Uri.parse('$baseUrl/v1/report/weekly'),
-      headers: _headers,
-    );
-    
-    if (response.statusCode == 200) {
-      return json.decode(response.body);
-    } else {
-      throw Exception('Failed to get weekly report: ${response.statusCode} ${response.body}');
-    }
-  }
-
-  // ============ ALARMS ============
-  Future<List<dynamic>> getAlarms() async {
-    final response = await http.get(
-      Uri.parse('$baseUrl/v1/alarms'),
-      headers: _headers,
-    );
-    
-    if (response.statusCode == 200) {
-      return json.decode(response.body);
-    } else {
-      throw Exception('Failed to load alarms: ${response.statusCode} ${response.body}');
-    }
-  }
-
-  Future<Map<String, dynamic>> createAlarm(Map<String, dynamic> alarmData) async {
-    final response = await http.post(
-      Uri.parse('$baseUrl/v1/alarms'),
-      headers: _headers,
-      body: json.encode(alarmData),
-    );
-    
-    if (response.statusCode == 200 || response.statusCode == 201) {
-      return json.decode(response.body);
-    } else {
-      throw Exception('Failed to create alarm: ${response.statusCode} ${response.body}');
-    }
-  }
-
-  Future<Map<String, dynamic>> dismissAlarm(String alarmId) async {
-    final response = await http.post(
-      Uri.parse('$baseUrl/v1/alarms/$alarmId/fire'),
-      headers: _headers,
-    );
-    
-    if (response.statusCode == 200) {
-      return json.decode(response.body);
-    } else {
-      throw Exception('Failed to dismiss alarm: ${response.statusCode} ${response.body}');
-    }
-  }
-
-  Future<void> deleteAlarm(String alarmId) async {
-    final response = await http.delete(
-      Uri.parse('$baseUrl/v1/alarms/$alarmId'),
-      headers: _headers,
-    );
-    
-    if (response.statusCode != 200) {
-      throw Exception('Failed to delete alarm: ${response.statusCode} ${response.body}');
-    }
-  }
-
-  // ============ ANTI-HABITS ============
-  Future<List<dynamic>> getAntiHabits() async {
-    final response = await http.get(
-      Uri.parse('$baseUrl/v1/antihabits'),
-      headers: _headers,
-    );
-    
-    if (response.statusCode == 200) {
-      return json.decode(response.body);
-    } else {
-      throw Exception('Failed to load anti-habits: ${response.statusCode} ${response.body}');
-    }
-  }
-
-  Future<Map<String, dynamic>> recordSlip(String antiHabitId, {String? idempotencyKey}) async {
-    final headers = Map<String, String>.from(_headers);
-    if (idempotencyKey != null) {
-      headers['Idempotency-Key'] = idempotencyKey;
-    }
-
-    final response = await http.post(
-      Uri.parse('$baseUrl/v1/antihabits/$antiHabitId/slip'),
-      headers: headers,
-      body: json.encode({}),
-    );
-    
-    if (response.statusCode == 200) {
-      return json.decode(response.body);
-    } else {
-      throw Exception('Failed to record slip: ${response.statusCode} ${response.body}');
-    }
-  }
-
-  // ============ BILLING ============
-  Future<Map<String, dynamic>> getBillingUsage() async {
-    final response = await http.get(
-      Uri.parse('$baseUrl/v1/billing/usage'),
-      headers: _headers,
-    );
-    
-    if (response.statusCode == 200) {
-      return json.decode(response.body);
-    } else {
-      throw Exception('Failed to get billing usage: ${response.statusCode} ${response.body}');
-    }
-  }
-
-  Future<Map<String, dynamic>> createCheckoutSession() async {
-    final response = await http.post(
-      Uri.parse('$baseUrl/v1/billing/checkout'),
-      headers: _headers,
-    );
-    
-    if (response.statusCode == 200) {
-      return json.decode(response.body);
-    } else {
-      throw Exception('Failed to create checkout session: ${response.statusCode} ${response.body}');
-    }
-  }
-
-  Future<Map<String, dynamic>> createPortalSession() async {
-    final response = await http.post(
-      Uri.parse('$baseUrl/v1/billing/portal'),
-      headers: _headers,
-    );
-    
-    if (response.statusCode == 200) {
-      return json.decode(response.body);
-    } else {
-      throw Exception('Failed to create portal session: ${response.statusCode} ${response.body}');
-    }
-  }
-
-  // ============ STREAKS ============
-  Future<Map<String, dynamic>> getAchievements() async {
-    final response = await http.get(
-      Uri.parse('$baseUrl/api/v1/streaks/achievements'),
-      headers: _headers,
-    );
-    
-    if (response.statusCode == 200) {
-      return json.decode(response.body);
-    } else {
-      throw Exception('Failed to get achievements: ${response.statusCode} ${response.body}');
-    }
-  }
-
-  Future<Map<String, dynamic>> getStreakSummary() async {
-    final response = await http.get(
-      Uri.parse('$baseUrl/api/v1/streaks/summary'),
-      headers: _headers,
-    );
-    
-    if (response.statusCode == 200) {
-      return json.decode(response.body);
-    } else {
-      throw Exception('Failed to get streak summary: ${response.statusCode} ${response.body}');
-    }
-  }
-
-  // ============ POLICIES & ACCOUNT ============
-  Future<Map<String, dynamic>> getCurrentPolicies() async {
-    final response = await http.get(
-      Uri.parse('$baseUrl/v1/policies/current'),
-      headers: _headers,
-    );
-    
-    if (response.statusCode == 200) {
-      return json.decode(response.body);
-    } else {
-      throw Exception('Failed to get policies: ${response.body}');
-    }
-  }
-
-  Future<Map<String, dynamic>> exportAccountData() async {
-    final response = await http.post(
-      Uri.parse('$baseUrl/v1/account/export'),
-      headers: _headers,
-    );
-    
-    if (response.statusCode == 200) {
-      return json.decode(response.body);
-    } else {
-      throw Exception('Failed to export data: ${response.body}');
-    }
-  }
-
-  Future<Map<String, dynamic>> deleteAccount() async {
-    final response = await http.post(
-      Uri.parse('$baseUrl/v1/account/delete'),
-      headers: _headers,
-    );
-    
-    if (response.statusCode == 200) {
-      return json.decode(response.body);
-    } else {
-      throw Exception('Failed to delete account: ${response.body}');
-    }
-  }
-
-  // ============ HABIT & TASK DELETION ============
-  Future<void> deleteHabit(String habitId) async {
-    final response = await http.delete(
-      Uri.parse('$baseUrl/api/v1/habits/$habitId'),
-      headers: _headers,
-    );
-    
-    if (response.statusCode != 200) {
-      throw Exception('Failed to delete habit: ${response.statusCode} ${response.body}');
-    }
+    final url = Uri.parse('${getBaseUrl()}/api/v1/tasks/$taskId/complete');
+    final r = await http.post(url, headers: _headers(), body: jsonEncode({}));
+    if (r.statusCode != 200 && r.statusCode != 201) throw Exception('Failed to complete task');
+    return Map<String, dynamic>.from(jsonDecode(r.body));
   }
 
   Future<void> deleteTask(String taskId) async {
-    final response = await http.delete(
-      Uri.parse('$baseUrl/api/v1/tasks/$taskId'),
-      headers: _headers,
-    );
-    
-    if (response.statusCode != 200) {
-      throw Exception('Failed to delete task: ${response.statusCode} ${response.body}');
-    }
-  }
-
-  Future<Map<String, dynamic>> fireAlarm(String alarmId) async {
-    final response = await http.post(
-      Uri.parse('$baseUrl/v1/alarms/$alarmId/fire'),
-      headers: _headers,
-    );
-    
-    if (response.statusCode == 200) {
-      return json.decode(response.body);
-    } else {
-      throw Exception('Failed to fire alarm: ${response.statusCode} ${response.body}');
-    }
+    final url = Uri.parse('${getBaseUrl()}/api/v1/tasks/$taskId');
+    final r = await http.delete(url, headers: _headers());
+    if (r.statusCode != 200) throw Exception('Failed to delete task');
   }
 }
 
 final apiClient = ApiClient();
+
+// Helper for fire-and-forget futures
+void unawaited(Future<void> future) {
+  future.catchError((e) => print('Background error: $e'));
+}

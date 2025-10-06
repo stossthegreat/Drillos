@@ -1,35 +1,32 @@
+// ✅ Frontend now owns habit scheduling, streaks, XP, alarms.
+// This scheduler exists ONLY for OS brain tasks: briefs and nudges.
+
 import { Queue } from "bullmq";
 import { redis } from "../utils/redis";
 
 export const schedulerQueue = new Queue("scheduler", { connection: redis });
 
-/**
- * Boot the repeatable background jobs for DrillOS
- * NOTE: Worker is instantiated in src/workers/scheduler.worker.ts
- */
 export async function bootstrapSchedulers() {
-  console.log("🔧 Bootstrapping scheduler jobs...");
-  
-  // scan alarms every minute
-  await schedulerQueue.add(
-    "scan-alarms",
-    {},
-    { repeat: { every: 60_000 }, removeOnComplete: true, removeOnFail: true }
-  );
+  console.log("⏰ Schedulers active (OS brain only)");
 
-  // re-ensure daily briefs hourly
-  await schedulerQueue.add(
-    "ensure-daily-briefs",
-    {},
-    { repeat: { every: 60 * 60_000 }, removeOnComplete: true, removeOnFail: true }
-  );
+  // Morning brief (7AM) per user will be upserted hourly by ensure-daily-briefs
+  await schedulerQueue.add("ensure-daily-briefs", {}, {
+    repeat: { every: 60 * 60_000 },
+    removeOnComplete: true,
+    removeOnFail: true
+  });
 
-  // re-ensure random nudges hourly
-  await schedulerQueue.add(
-    "ensure-random-nudges",
-    {},
-    { repeat: { every: 60 * 60_000 }, removeOnComplete: true, removeOnFail: true }
-  );
-  
-  console.log("✅ Scheduler jobs registered");
+  // Evening debrief (9PM) per user
+  await schedulerQueue.add("ensure-evening-debriefs", {}, {
+    repeat: { every: 60 * 60_000 },
+    removeOnComplete: true,
+    removeOnFail: true
+  });
+
+  // AI nudges hourly (we decide if/when to send)
+  await schedulerQueue.add("auto-nudges-hourly", {}, {
+    repeat: { every: 60 * 60_000 },
+    removeOnComplete: true,
+    removeOnFail: true
+  });
 }
