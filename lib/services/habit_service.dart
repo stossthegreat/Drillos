@@ -185,30 +185,6 @@ class HabitService {
     final today = DateTime.now();
     final todayHabits = <Map<String, dynamic>>[];
 
-    // ✅ MIGRATION: Add default schedule to habits that don't have one
-    final habitsToUpdate = <Map<String, dynamic>>[];
-    for (final habit in allHabits) {
-      if (habit['schedule'] == null) {
-        final updated = {
-          ...Map<String, dynamic>.from(habit),
-          'schedule': {
-            'startDate': DateTime.now().toIso8601String(),
-            'endDate': null,
-            'daysOfWeek': [1, 2, 3, 4, 5, 6, 7], // Default to daily
-          }
-        };
-        habitsToUpdate.add(updated);
-        print('🔄 Migrating habit ${habit['title']} to have default daily schedule');
-      }
-    }
-    
-    // Save migrated habits
-    if (habitsToUpdate.isNotEmpty) {
-      for (final habit in habitsToUpdate) {
-        await _storage.saveHabit(habit);
-      }
-      print('✅ Migrated ${habitsToUpdate.length} habits to have schedules');
-    }
 
     for (final habit in allHabits) {
       if (habit['type'] == 'task') {
