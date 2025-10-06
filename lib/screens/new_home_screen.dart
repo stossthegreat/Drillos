@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../services/api_client.dart';
+import '../services/habit_service.dart';
 import '../design/feedback.dart';
 import '../audio/tts_provider.dart';
 import '../logic/habit_engine.dart';
@@ -107,13 +108,13 @@ class _NewHomeScreenState extends State<NewHomeScreen> with TickerProviderStateM
     setState(() => isLoading = true);
     try {
       // ✅ OFFLINE-FIRST: Load habits from local storage (instant)
-      print('🎯 Loading today\'s habits from local engine...');
+      print('🎯 Loading today\'s habits from local service...');
       
       // Check for streak resets first
       await HabitEngine.checkStreakResets();
       
       // Get today's habits (filtered by schedule, loaded from local storage)
-      final today = await HabitEngine.getTodayHabits();
+      final today = await habitService.getTodayHabits();
       print('📋 Today items (local, schedule-filtered): ${today.length}');
       
       // Load AI brief for motivational message only (async, non-blocking)
