@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_client.dart';
+import '../services/local_storage.dart';
 import '../design/feedback.dart';
 import '../widgets/habit_create_edit_modal.dart';
 import '../logic/habit_engine.dart';
@@ -94,19 +95,39 @@ class _NewHabitsScreenState extends State<NewHabitsScreen> with TickerProviderSt
   Future<void> _loadData() async {
     setState(() => isLoading = true);
     try {
-      apiClient.setAuthToken('valid-token');
-      apiClient.setUserId('demo-user-123');
+      // ✅ OFFLINE-FIRST: Load from local storage
+      print('🎯 Loading habits from local engine...');
       
-      // Load habits and tasks using existing endpoints
-      final habitsResult = await apiClient.getHabits();
-      final tasksResult = await apiClient.getTasks();
+      // Check for streak resets
+      await HabitEngine.checkStreakResets();
       
-      // Combine habits and tasks with type field
-      final List<dynamic> combinedItems = [];
-      combinedItems.addAll(habitsResult.map((habit) => {
-        ...habit,
-        'type': 'habit',
+      // Get all habits from local storage (not filtered by date)
+      final storage = localStorage;
+      final habits = await storage.getAllHabits();
+      
+      // Load streak and completion data for each habit
+      final enrichedHabits = await Future.wait(habits.map((habit) async {
+        final habitId = habit['id'];
+        final streak = await storage.getStreak(habitId);
+        final completed = await storage.isCompletedOn(habitId, DateTime.now());
+        
+        return {
+          ...habit,
+          'type': 'habit',
+          'streak': streak,
+          'completed': completed,
+        };
       }));
+      
+      // Load tasks from API (tasks are still backend-managed)
+      final tasksResult = await apiClient.getTasks().catchError((e) {
+        print('⚠️ Failed to load tasks: $e');
+        return <Map<String, dynamic>>[];
+      });
+      
+      // Combine habits and tasks
+      final List<dynamic> combinedItems = [];
+      combinedItems.addAll(enrichedHabits);
       combinedItems.addAll(tasksResult.map((task) => {
         ...task,
         'type': 'task',

@@ -4,6 +4,7 @@ import '../services/api_client.dart';
 import '../design/feedback.dart';
 import '../audio/tts_provider.dart';
 import '../logic/habit_engine.dart';
+import '../widgets/xp_hud.dart';
 
 class NewHomeScreen extends StatefulWidget {
   final String? refreshTrigger;
@@ -105,17 +106,23 @@ class _NewHomeScreenState extends State<NewHomeScreen> with TickerProviderStateM
   Future<void> _loadData() async {
     setState(() => isLoading = true);
     try {
-      // ✅ PHASE 1: Frontend handles schedule filtering
-      print('🎯 Loading today\'s items (frontend-filtered by schedule)...');
+      // ✅ OFFLINE-FIRST: Load habits from local storage (instant)
+      print('🎯 Loading today\'s habits from local engine...');
       
-      // Load today's habits filtered by schedule (uses lib/utils/schedule.dart)
-      final today = await apiClient.getTodayItems();
-      print('📋 Today items (schedule-filtered): ${today.length}');
+      // Check for streak resets first
+      await HabitEngine.checkStreakResets();
       
-      // Load AI brief for motivational message only
-      final briefResult = await apiClient.getBrief();
+      // Get today's habits (filtered by schedule, loaded from local storage)
+      final today = await HabitEngine.getTodayHabits();
+      print('📋 Today items (local, schedule-filtered): ${today.length}');
       
-      // Load AI nudge if available
+      // Load AI brief for motivational message only (async, non-blocking)
+      final briefResult = await apiClient.getBrief().catchError((e) {
+        print('⚠️ Brief unavailable: $e');
+        return <String, dynamic>{};
+      });
+      
+      // Load AI nudge if available (async, non-blocking)
       Map<String, dynamic>? nudgeResult;
       try {
         nudgeResult = await apiClient.getNudge();
@@ -123,9 +130,15 @@ class _NewHomeScreenState extends State<NewHomeScreen> with TickerProviderStateM
         print('⚠️ No nudge available: $e');
       }
       
+      // Get overall stats for XP HUD
+      final stats = await HabitEngine.getStats();
+      
       if (mounted) {
         setState(() {
-          briefData = briefResult;
+          briefData = {
+            ...briefResult,
+            'stats': stats, // Add local stats to brief data
+          };
           todayItems = today;
           currentNudge = nudgeResult;
           isLoading = false;
@@ -940,6 +953,17 @@ class _NewHomeScreenState extends State<NewHomeScreen> with TickerProviderStateM
             SliverList(
               delegate: SliverChildListDelegate([
                 _buildWeekStrip(),
+                const SizedBox(height: 16),
+                // ✨ XP HUD - Shows live stats from local storage
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: XpHud(
+                    totalXP: (briefData['stats']?['totalXP'] ?? 0) as int,
+                    longestStreak: (briefData['stats']?['longestStreak'] ?? 0) as int,
+                    completedToday: (briefData['stats']?['completedToday'] ?? 0) as int,
+                    totalHabits: (briefData['stats']?['totalHabits'] ?? 0) as int,
+                  ),
+                ),
                 const SizedBox(height: 24),
                 _buildHeroSection(),
                 const SizedBox(height: 24),
