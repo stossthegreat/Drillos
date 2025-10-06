@@ -552,7 +552,7 @@ class _HabitCreateEditModalState extends State<HabitCreateEditModal> with Single
                                     child: _buildDropdown(
                                       label: 'Repeat',
                                       value: _formData['frequency'] ?? 'daily',
-                                      options: ['daily', 'weekdays', 'everyN', 'custom'],
+                                      options: ['daily', 'weekdays', 'weekends', 'everyN', 'custom'],
                                       onChanged: (value) => _updateFormData('frequency', value),
                                     ),
                                   ),

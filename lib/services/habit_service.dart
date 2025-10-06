@@ -185,6 +185,31 @@ class HabitService {
     final today = DateTime.now();
     final todayHabits = <Map<String, dynamic>>[];
 
+    // ✅ MIGRATION: Add default schedule to habits that don't have one
+    final habitsToUpdate = <Map<String, dynamic>>[];
+    for (final habit in allHabits) {
+      if (habit['schedule'] == null) {
+        final updated = {
+          ...Map<String, dynamic>.from(habit),
+          'schedule': {
+            'startDate': DateTime.now().toIso8601String(),
+            'endDate': null,
+            'daysOfWeek': [1, 2, 3, 4, 5, 6, 7], // Default to daily
+          }
+        };
+        habitsToUpdate.add(updated);
+        print('🔄 Migrating habit ${habit['title']} to have default daily schedule');
+      }
+    }
+    
+    // Save migrated habits
+    if (habitsToUpdate.isNotEmpty) {
+      for (final habit in habitsToUpdate) {
+        await _storage.saveHabit(habit);
+      }
+      print('✅ Migrated ${habitsToUpdate.length} habits to have schedules');
+    }
+
     for (final habit in allHabits) {
       if (habit['type'] == 'task') {
         // Tasks now use schedule just like habits
@@ -253,6 +278,16 @@ class HabitService {
         'endDate': data['endDate'],
         'daysOfWeek': [6, 7],
       };
+    } else if (frequency == 'everyN') {
+      // For everyN, we'll use a custom approach - store the interval
+      final everyN = data['everyN'] ?? 2;
+      schedule = {
+        'startDate': data['startDate'] ?? today.toIso8601String(),
+        'endDate': data['endDate'],
+        'daysOfWeek': [1, 2, 3, 4, 5, 6, 7], // All days, but we'll check interval
+        'everyN': everyN,
+        'lastCompleted': null,
+      };
     } else if (frequency == 'custom' && data['daysOfWeek'] != null) {
       schedule = {
         'startDate': data['startDate'] ?? today.toIso8601String(),
@@ -289,6 +324,16 @@ class HabitService {
       final endDate = DateTime.parse(endDateStr);
       final e = DateTime(endDate.year, endDate.month, endDate.day, 23, 59, 59);
       if (d.isAfter(e)) return false;
+    }
+    
+    // Handle everyN schedule
+    if (schedule['everyN'] != null) {
+      final everyN = schedule['everyN'] as int? ?? 2;
+      final startDate = DateTime.parse(startDateStr ?? DateTime.now().toIso8601String());
+      final daysSinceStart = d.difference(DateTime(startDate.year, startDate.month, startDate.day)).inDays;
+      final isActive = daysSinceStart % everyN == 0;
+      print('🔍 EveryN check: daysSinceStart=$daysSinceStart, everyN=$everyN, active=$isActive');
+      return isActive;
     }
     
     // ✅ FIX: Robust parsing of daysOfWeek from JSON
