@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../services/api_client.dart';
 import '../design/feedback.dart';
 import '../widgets/habit_create_edit_modal.dart';
+import '../logic/habit_engine.dart';
 
 class NewHabitsScreen extends StatefulWidget {
   const NewHabitsScreen({super.key});
@@ -134,9 +135,30 @@ class _NewHabitsScreenState extends State<NewHabitsScreen> with TickerProviderSt
 
   Future<void> _toggleCompletion(String itemId, DateTime date) async {
     try {
-      await apiClient.tickHabit(itemId, idempotencyKey: '${itemId}_${formatDate(date)}');
+      // ✅ PHASE 1: Use HabitEngine for instant local streak update
+      await HabitEngine.applyLocalTick(
+        habitId: itemId,
+        onApplied: (newStreak, newXp) {
+          print('✅ Local tick applied: streak=$newStreak, xp=$newXp');
+          // Update UI immediately
+          if (mounted) {
+            setState(() {
+              final index = allItems.indexWhere((item) => item['id'] == itemId);
+              if (index != -1) {
+                allItems[index] = {
+                  ...allItems[index],
+                  'streak': newStreak,
+                };
+              }
+            });
+          }
+        },
+      );
+      
+      // Fire-and-forget: log to backend for analytics (non-blocking)
+      apiClient.tickHabit(itemId, idempotencyKey: '${itemId}_${formatDate(date)}');
+      
       HapticFeedback.selectionClick();
-      // Optimistic update would go here
     } catch (e) {
       print('❌ Error toggling completion: $e');
     }

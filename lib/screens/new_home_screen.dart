@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import '../services/api_client.dart';
 import '../design/feedback.dart';
 import '../audio/tts_provider.dart';
+import '../logic/habit_engine.dart';
 
 class NewHomeScreen extends StatefulWidget {
   final String? refreshTrigger;
@@ -104,11 +105,15 @@ class _NewHomeScreenState extends State<NewHomeScreen> with TickerProviderStateM
   Future<void> _loadData() async {
     setState(() => isLoading = true);
     try {
-      apiClient.setAuthToken('valid-token');
-      apiClient.setUserId('demo-user-123');
+      // ✅ PHASE 1: Frontend handles schedule filtering
+      print('🎯 Loading today\'s items (frontend-filtered by schedule)...');
       
-      // Load today's brief using existing endpoint
-      final briefResult = await apiClient.getBriefToday();
+      // Load today's habits filtered by schedule (uses lib/utils/schedule.dart)
+      final today = await apiClient.getTodayItems();
+      print('📋 Today items (schedule-filtered): ${today.length}');
+      
+      // Load AI brief for motivational message only
+      final briefResult = await apiClient.getBrief();
       
       // Load AI nudge if available
       Map<String, dynamic>? nudgeResult;
@@ -116,49 +121,6 @@ class _NewHomeScreenState extends State<NewHomeScreen> with TickerProviderStateM
         nudgeResult = await apiClient.getNudge();
       } catch (e) {
         print('⚠️ No nudge available: $e');
-      }
-      
-      print('📋 Brief loaded: ${briefResult.keys}');
-      print('📋 Today items count: ${(briefResult['today'] as List?)?.length ?? 0}');
-      print('📋 Raw today data: ${briefResult['today']}');
-      
-      // ENHANCED: Load habits and tasks from new backend response
-      List<dynamic> today = briefResult['today'] ?? [];
-      
-      // If today is empty, build from habits and tasks
-      if (today.isEmpty) {
-        final habits = briefResult['habits'] as List? ?? [];
-        final tasks = briefResult['tasks'] as List? ?? [];
-        
-        print('📋 Building today from ${habits.length} habits and ${tasks.length} tasks');
-        
-        // Add habits to today
-        today.addAll(habits.map((habit) => {
-          'id': habit['id'],
-          'name': habit['title'] ?? habit['name'],
-          'type': 'habit',
-          'completed': _isCompletedToday(habit['lastTick']),
-          'streak': habit['streak'] ?? 0,
-          'color': habit['color'] ?? 'emerald',
-          'reminderEnabled': habit['reminderEnabled'] ?? false,
-          'reminderTime': habit['reminderTime'],
-        }));
-        
-        // Add tasks to today
-        today.addAll(tasks.map((task) => {
-          'id': task['id'],
-          'name': task['title'] ?? task['name'],
-          'type': 'task',
-          'completed': task['status'] == 'completed' || task['completed'] == true,
-          'dueDate': task['dueDate'],
-          'overdue': task['overdue'] ?? false,
-          'priority': task['priority'] ?? 'medium',
-          'color': task['color'] ?? 'amber',
-          'reminderEnabled': task['reminderEnabled'] ?? false,
-          'reminderTime': task['reminderTime'],
-        }));
-        
-        print('📋 Today items built: ${today.length} total');
       }
       
       if (mounted) {
@@ -182,14 +144,38 @@ class _NewHomeScreenState extends State<NewHomeScreen> with TickerProviderStateM
   Future<void> _toggleCompletion(String itemId, String itemType, DateTime date) async {
     final dateStr = formatDate(date);
     try {
-      // Use existing API endpoints
       if (itemType == 'habit') {
-        await apiClient.tickHabit(itemId, idempotencyKey: '${itemId}_$dateStr');
+        // ✅ PHASE 1: Use HabitEngine for instant local streak update
+        await HabitEngine.applyLocalTick(
+          habitId: itemId,
+          onApplied: (newStreak, newXp) {
+            print('✅ Local tick applied: streak=$newStreak, xp=$newXp');
+            // Update UI immediately
+            if (mounted) {
+              setState(() {
+                // Find and update the item in todayItems
+                final index = todayItems.indexWhere((item) => item['id'] == itemId);
+                if (index != -1) {
+                  todayItems[index] = {
+                    ...todayItems[index],
+                    'completed': true,
+                    'streak': newStreak,
+                  };
+                }
+              });
+            }
+          },
+        );
+        
+        // Fire-and-forget: log to backend for analytics (non-blocking)
+        apiClient.tickHabit(itemId, idempotencyKey: '${itemId}_$dateStr');
+        
       } else if (itemType == 'task') {
         await apiClient.completeTask(itemId);
+        // Refresh to update task completion
+        _loadData();
       }
-      // Refresh data to get updated state
-      _loadData();
+      
       HapticFeedback.selectionClick();
     } catch (e) {
       print('❌ Error toggling completion: $e');
