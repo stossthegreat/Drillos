@@ -77,14 +77,12 @@ export class BriefService {
     const habits = await habitsService.list(userId);
     const tasks = await tasksService.list(userId, true); // Include completed tasks
 
-    const completed = habits.filter(h => h.completedToday).length;
-    const pending = habits.length - completed;
-
+    // Frontend handles completion tracking, so we just list habits for AI context
     const context = `
 User: ${user?.id}
 Mentor: ${user?.mentorId ?? "marcus"}
-Habits: ${habits.map(h => `${h.title} (streak ${h.streak}, completedToday ${h.completedToday})`).join(", ")}
-Stats: ${completed} completed, ${pending} pending
+Habits: ${habits.map(h => `${h.title} (streak ${h.streak})`).join(", ")}
+Total habits: ${habits.length}
 `;
 
     const prompt = `
@@ -164,13 +162,12 @@ Focus on today's pending habits and streak risks.
     const user = await prisma.user.findUnique({ where: { id: userId } });
     const habits = await habitsService.list(userId);
 
-    const completed = habits.filter(h => h.completedToday).length;
-
+    // Frontend handles completion tracking, backend just provides motivational message
     const prompt = `
 You are ${user?.mentorId ?? "Drill Sergeant"}.
-Write an evening debrief about the user's performance.
-Mention completed ${completed}/${habits.length}.
-Be encouraging but hold them accountable.
+Write an evening debrief about the user's day.
+They have ${habits.length} habits to work on.
+Be encouraging but hold them accountable for tomorrow.
 `;
 
     const ai = await openai.chat.completions.create({
@@ -187,7 +184,7 @@ Be encouraging but hold them accountable.
       mentor: user?.mentorId,
       message: text,
       audio: voiceUrl,
-      stats: { completed, total: habits.length },
+      stats: { completed: 0, total: habits.length }, // Frontend tracks completion
     };
   }
 }
