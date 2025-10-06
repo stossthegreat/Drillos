@@ -170,8 +170,9 @@ class _NewHomeScreenState extends State<NewHomeScreen> with TickerProviderStateM
                 // Find and update the item in todayItems
                 final index = todayItems.indexWhere((item) => item['id'] == itemId);
                 if (index != -1) {
+                  final base = Map<String, dynamic>.from(todayItems[index] as Map);
                   todayItems[index] = {
-                    ...todayItems[index],
+                    ...base,
                     'completed': true,
                     'streak': newStreak,
                   };
@@ -870,8 +871,9 @@ class _NewHomeScreenState extends State<NewHomeScreen> with TickerProviderStateM
           setState(() {
             final index = todayItems.indexWhere((i) => i['id'] == item['id']);
             if (index != -1) {
+              final base = Map<String, dynamic>.from(todayItems[index] as Map);
               todayItems[index] = {
-                ...todayItems[index],
+                ...base,
                 'completed': true,
               };
             }
@@ -904,8 +906,9 @@ class _NewHomeScreenState extends State<NewHomeScreen> with TickerProviderStateM
               setState(() {
                 final index = todayItems.indexWhere((i) => i['id'] == item['id']);
                 if (index != -1) {
+                  final base = Map<String, dynamic>.from(todayItems[index] as Map);
                   todayItems[index] = {
-                    ...todayItems[index],
+                    ...base,
                     'completed': true,
                     'streak': newStreak,
                   };
