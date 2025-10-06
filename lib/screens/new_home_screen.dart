@@ -865,8 +865,21 @@ class _NewHomeScreenState extends State<NewHomeScreen> with TickerProviderStateM
     try {
       final itemType = item['type'] ?? 'habit';
       if (itemType == 'task') {
-        await apiClient.completeTask(item['id'].toString());
-        await _loadData(); // Refresh for tasks
+        // ✅ Local-first task completion
+        if (mounted) {
+          setState(() {
+            final index = todayItems.indexWhere((i) => i['id'] == item['id']);
+            if (index != -1) {
+              todayItems[index] = {
+                ...todayItems[index],
+                'completed': true,
+              };
+            }
+          });
+        }
+        // Update local completion + fire-and-forget backend
+        await habitService.completeTaskLocal(item['id'].toString());
+        apiClient.completeTask(item['id'].toString()).catchError((_){});
       } else {
         // ✅ FIX: Immediately mark as completed in UI BEFORE async operation
         if (mounted) {

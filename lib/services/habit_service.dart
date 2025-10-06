@@ -76,6 +76,7 @@ class HabitService {
       'updatedAt': now.toIso8601String(),
       'type': 'task',
       'dueDate': data['endDate'] ?? now.add(const Duration(days: 1)).toIso8601String(),
+      'schedule': _buildSchedule(data),
       'reminderEnabled': data['reminderOn'] ?? false,
       'reminderTime': data['reminderTime'],
       'priority': data['intensity'] ?? 2,
@@ -186,9 +187,18 @@ class HabitService {
 
     for (final habit in allHabits) {
       if (habit['type'] == 'task') {
-        // Tasks are shown if not completed
-        if (habit['completed'] != true) {
-          todayHabits.add(habit);
+        // Tasks now use schedule just like habits
+        final schedule = habit['schedule'] as Map<String, dynamic>?;
+        final isScheduled = schedule == null ? true : _isActiveOn(schedule, today);
+        if (!isScheduled) continue;
+
+        // Completion is tracked per-day locally
+        final completedToday = await _storage.isCompletedOn(habit['id'], today);
+        if (!completedToday) {
+          todayHabits.add({
+            ...habit,
+            'completed': false,
+          });
         }
         continue;
       }
@@ -333,16 +343,53 @@ class HabitService {
 
   Future<void> _createTaskAlarm(Map<String, dynamic> task) async {
     try {
+      // Use schedule days if available; otherwise default to all days
+      final schedule = task['schedule'] as Map<String, dynamic>?;
+      List<int> daysOfWeek = [1, 2, 3, 4, 5, 6, 7];
+      final rawDays = schedule?['daysOfWeek'];
+      if (rawDays is List) {
+        final parsed = <int>[];
+        for (final day in rawDays) {
+          if (day is int && day >= 1 && day <= 7) parsed.add(day);
+          else if (day is String) {
+            final d = int.tryParse(day);
+            if (d != null && d >= 1 && d <= 7) parsed.add(d);
+          } else if (day is num) {
+            final d = day.toInt();
+            if (d >= 1 && d <= 7) parsed.add(d);
+          }
+        }
+        if (parsed.isNotEmpty) daysOfWeek = parsed;
+      }
+
       await _alarms.scheduleAlarm(
         habitId: task['id'],
         habitName: task['title'] ?? task['name'],
         time: task['reminderTime'],
-        daysOfWeek: [1, 2, 3, 4, 5, 6, 7], // Tasks can fire any day
+        daysOfWeek: daysOfWeek,
         mentorMessage: '📋 Task reminder: ${task['title'] ?? task['name']}',
       );
       print('✅ Created alarm for task');
     } catch (e) {
       print('❌ Error creating task alarm: $e');
+    }
+  }
+
+  /// ✅ Mark a task as completed locally for today (instant UI)
+  Future<void> completeTaskLocal(String taskId, {DateTime? when}) async {
+    final date = when ?? DateTime.now();
+    await _storage.markCompleted(taskId, date);
+
+    // Also update task object 'completed' flag to help UI lists that depend on it
+    final items = await _storage.getAllHabits();
+    final index = items.indexWhere((i) => i['id'] == taskId);
+    if (index >= 0) {
+      items[index] = {
+        ...items[index],
+        'completed': true,
+        'updatedAt': DateTime.now().toIso8601String(),
+      };
+      await _storage.saveAllHabits(items);
     }
   }
 
