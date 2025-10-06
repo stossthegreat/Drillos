@@ -1,7 +1,7 @@
 import { prisma } from "../utils/db";
 import OpenAI from "openai";
 import { VoiceService } from "./voice.service";
-import { HabitsService } from "./habits.service";
+import { habitsService } from "./habits.service";
 import { tasksService } from "./tasks.service";
 
 // Lazy OpenAI initialization - only when actually needed
@@ -19,7 +19,7 @@ function getOpenAIClient() {
 }
 
 const voiceService = new VoiceService();
-const habitsService = new HabitsService();
+// habitsService is already imported as an object
 
 export class BriefService {
   async getTodaysBrief(userId: string) {

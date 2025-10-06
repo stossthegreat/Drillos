@@ -55,9 +55,8 @@ export default async function briefRoutes(fastify: FastifyInstance, _opts: Fasti
       await ensureDemoUser(userId);
       
       // DIRECT IMPLEMENTATION - bypass service for now
-      const { HabitsService } = await import('../services/habits.service');
+      const { habitsService } = await import('../services/habits.service');
       const { tasksService } = await import('../services/tasks.service');
-      const habitsService = new HabitsService();
       
              const habits = await habitsService.list(userId);
              const tasks = await tasksService.list(userId, true); // Include completed tasks
@@ -150,9 +149,8 @@ export default async function briefRoutes(fastify: FastifyInstance, _opts: Fasti
       const userId = getUserIdOrThrow(req);
       await ensureDemoUser(userId);
       
-      const { HabitsService } = await import('../services/habits.service');
+      const { habitsService } = await import('../services/habits.service');
       const { tasksService } = await import('../services/tasks.service');
-      const habitsService = new HabitsService();
       
       const habits = await habitsService.list(userId);
       const tasks = await tasksService.list(userId, true); // Include completed tasks

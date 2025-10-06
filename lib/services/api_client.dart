@@ -19,6 +19,14 @@ class ApiClient {
     _baseUrl = url;
   }
 
+  void setAuthToken(String token) {
+    // For compatibility - not used in new architecture
+  }
+
+  void setUserId(String userId) {
+    // For compatibility - not used in new architecture
+  }
+
   Map<String, String> _headers() => {
     'Content-Type': 'application/json',
     'x-user-id': 'demo-user-123',
@@ -59,12 +67,16 @@ class ApiClient {
 
   // ---- TICK (fire-and-forget for UI speed) ----
 
-  Future<void> tickHabit(String id, {DateTime? when}) async {
+  Future<void> tickHabit(String id, {DateTime? when, String? idempotencyKey}) async {
     // non-blocking: don't await in UI
     final url = Uri.parse('${getBaseUrl()}/api/v1/habits/$id/tick');
+    final headers = Map<String, String>.from(_headers());
+    if (idempotencyKey != null) {
+      headers['Idempotency-Key'] = idempotencyKey;
+    }
     unawaited(http.post(
       url,
-      headers: _headers(),
+      headers: headers,
       body: jsonEncode({
         if (when != null) 'date': when.toIso8601String(),
       }),
@@ -174,6 +186,85 @@ class ApiClient {
     final url = Uri.parse('${getBaseUrl()}/api/v1/tasks/$taskId');
     final r = await http.delete(url, headers: _headers());
     if (r.statusCode != 200) throw Exception('Failed to delete task');
+  }
+
+  // ---- LEGACY COMPATIBILITY METHODS ----
+
+  Future<Map<String, dynamic>> selectForToday(String habitId, {String? date}) async {
+    final url = Uri.parse('${getBaseUrl()}/v1/brief/today/select');
+    final r = await http.post(url, headers: _headers(), body: jsonEncode({
+      'habitId': habitId,
+      if (date != null) 'date': date,
+    }));
+    if (r.statusCode != 200 && r.statusCode != 201) throw Exception('Failed to select for today');
+    return Map<String, dynamic>.from(jsonDecode(r.body));
+  }
+
+  Future<Map<String, dynamic>> deselectForToday(String habitId, {String? date}) async {
+    final url = Uri.parse('${getBaseUrl()}/v1/brief/today/deselect');
+    final r = await http.post(url, headers: _headers(), body: jsonEncode({
+      'habitId': habitId,
+      if (date != null) 'date': date,
+    }));
+    if (r.statusCode != 200 && r.statusCode != 201) throw Exception('Failed to deselect for today');
+    return Map<String, dynamic>.from(jsonDecode(r.body));
+  }
+
+  Future<Map<String, dynamic>> createAlarm(Map<String, dynamic> alarmData) async {
+    final url = Uri.parse('${getBaseUrl()}/v1/alarms');
+    final r = await http.post(url, headers: _headers(), body: jsonEncode(alarmData));
+    if (r.statusCode != 200 && r.statusCode != 201) throw Exception('Failed to create alarm');
+    return Map<String, dynamic>.from(jsonDecode(r.body));
+  }
+
+  Future<Map<String, dynamic>> getAchievements() async {
+    final url = Uri.parse('${getBaseUrl()}/api/v1/streaks/achievements');
+    final r = await http.get(url, headers: _headers());
+    if (r.statusCode != 200) throw Exception('Failed to get achievements');
+    return Map<String, dynamic>.from(jsonDecode(r.body));
+  }
+
+  Future<Map<String, dynamic>> getStreakSummary() async {
+    final url = Uri.parse('${getBaseUrl()}/api/v1/streaks/summary');
+    final r = await http.get(url, headers: _headers());
+    if (r.statusCode != 200) throw Exception('Failed to get streak summary');
+    return Map<String, dynamic>.from(jsonDecode(r.body));
+  }
+
+  Future<Map<String, dynamic>> sendChatMessage(String message, {String mode = 'balanced', bool includeVoice = true}) async {
+    final url = Uri.parse('${getBaseUrl()}/v1/chat');
+    final r = await http.post(url, headers: _headers(), body: jsonEncode({
+      'message': message,
+      'mode': mode,
+      'includeVoice': includeVoice,
+    }));
+    if (r.statusCode != 200 && r.statusCode != 201) throw Exception('Failed to send chat message');
+    return Map<String, dynamic>.from(jsonDecode(r.body));
+  }
+
+  Future<Map<String, dynamic>> createCheckoutSession() async {
+    final url = Uri.parse('${getBaseUrl()}/v1/billing/checkout');
+    final r = await http.post(url, headers: _headers());
+    if (r.statusCode != 200) throw Exception('Failed to create checkout session');
+    return Map<String, dynamic>.from(jsonDecode(r.body));
+  }
+
+  Future<Map<String, dynamic>> getVoicePreset(String presetId) async {
+    final url = Uri.parse('${getBaseUrl()}/v1/voice/preset/$presetId');
+    final r = await http.get(url, headers: _headers());
+    if (r.statusCode != 200) throw Exception('Failed to get voice preset');
+    return Map<String, dynamic>.from(jsonDecode(r.body));
+  }
+
+  Future<Map<String, dynamic>> ttsVoice(String text, {String voice = 'balanced'}) async {
+    final url = Uri.parse('${getBaseUrl()}/v1/voice/tts');
+    final r = await http.post(url, headers: _headers(), body: jsonEncode({
+      'text': text,
+      'voice': voice,
+    }));
+    if (r.statusCode == 402) throw Exception('TTS quota exceeded or PRO plan required');
+    if (r.statusCode != 200) throw Exception('Failed to generate TTS');
+    return Map<String, dynamic>.from(jsonDecode(r.body));
   }
 }
 
