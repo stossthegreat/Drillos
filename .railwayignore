@@ -1,4 +1,4 @@
-# Ignore Flutter frontend files
+# Ignore Flutter/Dart files for Railway deployment
 lib/
 android/
 ios/
@@ -6,13 +6,12 @@ linux/
 macos/
 windows/
 web/
-test/
-build/
 pubspec.yaml
 pubspec.lock
 analysis_options.yaml
-*.dart
-*.iml
+.dart_tool/
+build/
+test/
 
-# Keep only backend
+# Keep only backend files
 !backend/

@@ -1,14 +1,17 @@
 {
   "name": "drillos-monorepo",
   "version": "1.0.0",
-  "description": "Drillos - Flutter frontend + Node.js backend",
+  "description": "DrillOS - The active habit operating system",
   "private": true,
+  "workspaces": [
+    "backend"
+  ],
   "scripts": {
-    "build": "cd backend && CI=false npm run build",
-    "start": "cd backend && npx prisma db push && node dist/server.js",
-    "install": "cd backend && npm ci --only=production"
+    "build": "cd backend && npm run build",
+    "start": "cd backend && npm start"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0"
   }
 }
