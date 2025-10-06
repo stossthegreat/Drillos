@@ -145,21 +145,28 @@ class HabitService {
 
   /// ✅ Delete a habit
   Future<void> deleteHabit(String id) async {
-    print('🎯 Deleting habit locally: $id');
+    print('🗑️ HabitService.deleteHabit called for: $id');
     
     // Delete locally
+    print('🗑️ Deleting from local storage...');
     await _storage.deleteHabit(id);
+    print('✅ Deleted from local storage');
     
     // Cancel any alarms
+    print('🔔 Cancelling alarms...');
     await _alarms.cancelAlarm(id);
+    print('✅ Alarms cancelled');
     
-    // Delete from backend
+    // Delete from backend (fire-and-forget)
+    print('🌐 Syncing delete to backend...');
     try {
       await _api.deleteHabit(id);
       print('✅ Habit deleted from backend');
     } catch (e) {
-      print('⚠️ Failed to delete from backend: $e');
+      print('⚠️ Failed to delete from backend (OK, it\'s local-first): $e');
     }
+    
+    print('✅ HabitService.deleteHabit complete for: $id');
   }
 
   /// ✅ Get all habits

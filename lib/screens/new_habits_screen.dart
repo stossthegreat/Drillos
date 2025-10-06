@@ -106,18 +106,25 @@ class _NewHabitsScreenState extends State<NewHabitsScreen> with TickerProviderSt
       final storage = localStorage;
       final habits = await storage.getAllHabits();
       
-      // Load streak and completion data for each habit
-      final enrichedHabits = await Future.wait(habits.map((habit) async {
-        final habitId = habit['id'];
-        final streak = await storage.getStreak(habitId);
-        final completed = await storage.isCompletedOn(habitId, DateTime.now());
+      // Load streak and completion data for each item
+      final enrichedItems = await Future.wait(habits.map((item) async {
+        final itemId = item['id'];
+        final itemType = item['type'] ?? 'habit'; // Preserve original type
         
-        return {
-          ...habit,
-          'type': 'habit',
-          'streak': streak,
-          'completed': completed,
-        };
+        // Only load streak/completion for habits (not tasks)
+        if (itemType == 'habit') {
+          final streak = await storage.getStreak(itemId);
+          final completed = await storage.isCompletedOn(itemId, DateTime.now());
+          
+          return {
+            ...item,
+            'streak': streak,
+            'completed': completed,
+          };
+        }
+        
+        // Tasks don't have streaks
+        return item;
       }));
       
       // Load tasks from API (tasks are still backend-managed)
@@ -126,13 +133,23 @@ class _NewHabitsScreenState extends State<NewHabitsScreen> with TickerProviderSt
         return <Map<String, dynamic>>[];
       });
       
-      // Combine habits and tasks
+      // Combine local items and backend tasks (avoiding duplicates)
       final List<dynamic> combinedItems = [];
-      combinedItems.addAll(enrichedHabits);
-      combinedItems.addAll(tasksResult.map((task) => {
-        ...task,
-        'type': 'task',
-      }));
+      
+      // Add all local items (habits and tasks from storage)
+      combinedItems.addAll(enrichedItems);
+      
+      // Add backend tasks (only if not already in local storage)
+      for (final task in tasksResult) {
+        final taskId = task['id'];
+        final alreadyExists = combinedItems.any((item) => item['id'] == taskId);
+        if (!alreadyExists) {
+          combinedItems.add({
+            ...task,
+            'type': 'task',
+          });
+        }
+      }
       
       setState(() {
         allItems = combinedItems;
@@ -242,17 +259,23 @@ class _NewHabitsScreenState extends State<NewHabitsScreen> with TickerProviderSt
   }
 
   Future<void> _deleteItem(String itemId) async {
+    print('🗑️ Delete button pressed for item: $itemId');
     try {
       // ✅ Delete locally first (instant)
+      print('🗑️ Calling habitService.deleteHabit...');
       await habitService.deleteHabit(itemId);
+      print('✅ Item deleted from local storage');
       
       // Reload data from local storage
+      print('🔄 Reloading data...');
       await _loadData();
+      print('✅ Data reloaded');
+      
       HapticFeedback.heavyImpact();
       
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('✅ Item deleted')),
+          const SnackBar(content: Text('✅ Item deleted'), duration: Duration(seconds: 1)),
         );
       }
     } catch (e) {
