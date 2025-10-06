@@ -152,10 +152,14 @@ class HabitService {
     await _storage.deleteHabit(id);
     print('✅ Deleted from local storage');
     
-    // Cancel any alarms
+    // Cancel any alarms (wrapped in try-catch to prevent delete failure)
     print('🔔 Cancelling alarms...');
-    await _alarms.cancelAlarm(id);
-    print('✅ Alarms cancelled');
+    try {
+      await _alarms.cancelAlarm(id);
+      print('✅ Alarms cancelled');
+    } catch (e) {
+      print('⚠️ Failed to cancel alarms (OK, continuing): $e');
+    }
     
     // Delete from backend (fire-and-forget)
     print('🌐 Syncing delete to backend...');

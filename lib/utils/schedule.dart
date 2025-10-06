@@ -27,8 +27,13 @@ class HabitSchedule {
     final raw = json['daysOfWeek'];
     if (raw is List) {
       for (final r in raw) {
-        final i = int.tryParse('$r');
-        if (i != null && i >= 1 && i <= 7) days.add(i);
+        // ✅ FIX: Handle both int and string types
+        if (r is int && r >= 1 && r <= 7) {
+          days.add(r);
+        } else if (r is String) {
+          final i = int.tryParse(r);
+          if (i != null && i >= 1 && i <= 7) days.add(i);
+        }
       }
     }
     return HabitSchedule(

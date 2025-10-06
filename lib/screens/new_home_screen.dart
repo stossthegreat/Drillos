@@ -866,11 +866,32 @@ class _NewHomeScreenState extends State<NewHomeScreen> with TickerProviderStateM
       final itemType = item['type'] ?? 'habit';
       if (itemType == 'task') {
         await apiClient.completeTask(item['id'].toString());
+        await _loadData(); // Refresh for tasks
       } else {
-        await apiClient.tickHabit(item['id'].toString());
+        // ✅ FIX: Use HabitEngine for local streak update (same as _toggleCompletion)
+        await HabitEngine.applyLocalTick(
+          habitId: item['id'].toString(),
+          onApplied: (newStreak, newXp) {
+            print('✅ Local tick applied: streak=$newStreak, xp=$newXp');
+            // Update UI immediately
+            if (mounted) {
+              setState(() {
+                final index = todayItems.indexWhere((i) => i['id'] == item['id']);
+                if (index != -1) {
+                  todayItems[index] = {
+                    ...todayItems[index],
+                    'completed': true,
+                    'streak': newStreak,
+                  };
+                }
+              });
+            }
+          },
+        );
+        
+        // Fire-and-forget: log to backend
+        apiClient.tickHabit(item['id'].toString(), idempotencyKey: '${item['id']}_${formatDate(DateTime.now())}');
       }
-      // Always refresh from API after any mutation
-      await _loadData();
       HapticFeedback.selectionClick();
     } catch (e) {
       print('❌ Error toggling completion: $e');
