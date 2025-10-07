@@ -4,8 +4,6 @@ import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest.dart' as tzdata;
 import '../services/local_storage.dart';
 
-/// 🔔 Alarm Service - Local (front-end only) habit reminders
-/// Works offline. No backend dependency.
 class AlarmService {
   static final AlarmService _instance = AlarmService._internal();
   factory AlarmService() => _instance;
@@ -19,13 +17,9 @@ class AlarmService {
   Future<void> init() async {
     if (_initialized) return;
 
-    // Timezone DB
     tzdata.initializeTimeZones();
 
-    // Android init
     const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
-
-    // iOS init
     const iosInit = DarwinInitializationSettings(
       requestAlertPermission: true,
       requestBadgePermission: true,
@@ -41,13 +35,12 @@ class AlarmService {
     _initialized = true;
   }
 
-  /// Request permissions (iOS + Android 13+)
   Future<bool> requestPermissions() async {
     await init();
 
     bool granted = true;
 
-    // iOS
+    // iOS permissions
     final ios = _plugin.resolvePlatformSpecificImplementation<
         IOSFlutterLocalNotificationsPlugin>();
     if (ios != null) {
@@ -59,29 +52,20 @@ class AlarmService {
       granted = (result ?? true) && granted;
     }
 
-    // Android 13+ runtime permission
+    // Android doesn't need runtime permission below API 33
     if (Platform.isAndroid) {
       final androidImpl = _plugin
           .resolvePlatformSpecificImplementation<
               AndroidFlutterLocalNotificationsPlugin>();
       if (androidImpl != null) {
         final res = await androidImpl.areNotificationsEnabled();
-        if (res == false) {
-          // Try to request (will no-op on older versions)
-          await androidImpl.requestPermission();
-          final after = await androidImpl.areNotificationsEnabled();
-          granted = after && granted;
-        }
+        granted = (res ?? true) && granted;
       }
     }
+
     return granted;
   }
 
-  /// Schedule a repeating alarm for specific weekdays at a time.
-  ///
-  /// [habitId] is used to make unique notification IDs.
-  /// [time] format: "HH:mm" (24h)
-  /// [daysOfWeek]: 1..7 (Mon..Sun)
   Future<void> scheduleAlarm({
     required String habitId,
     required String habitName,
@@ -94,11 +78,9 @@ class AlarmService {
     final parts = time.split(':');
     final hour = int.tryParse(parts[0]) ?? 8;
     final minute = int.tryParse(parts[1]) ?? 0;
+    final message =
+        mentorMessage ?? '⚡ Time to complete your habit: $habitName';
 
-    final message = mentorMessage ??
-        '⚡ Time to complete your habit: $habitName';
-
-    // Android channel + details (default sound to avoid missing resource issues)
     const androidDetails = AndroidNotificationDetails(
       'habit_reminders',
       'Habit Reminders',
@@ -137,12 +119,9 @@ class AlarmService {
       );
     }
 
-    // Save for reference
     await localStorage.setAlarmTime(habitId, time);
-    // (You can also save mentor voice choice here later)
   }
 
-  /// Cancel all weekday notifications for this habit ID.
   Future<void> cancelAlarm(String habitId) async {
     await init();
     for (int dow = 1; dow <= 7; dow++) {
@@ -156,11 +135,8 @@ class AlarmService {
     return _plugin.pendingNotificationRequests();
   }
 
-  // --- helpers ---
-
   int _notificationId(String habitId, int dow) {
-    // stable unique ID per habit+day
-    final base = habitId.hashCode & 0x7fffffff; // positive
+    final base = habitId.hashCode & 0x7fffffff;
     return (base ^ dow) % 0x7fffffff;
   }
 
@@ -169,7 +145,6 @@ class AlarmService {
     var scheduled =
         tz.TZDateTime(tz.local, now.year, now.month, now.day, hour, minute);
 
-    // step forward to the requested weekday
     while (scheduled.weekday != dow || !scheduled.isAfter(now)) {
       scheduled = scheduled.add(const Duration(days: 1));
     }
