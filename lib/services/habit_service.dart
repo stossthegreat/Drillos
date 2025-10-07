@@ -30,7 +30,7 @@ class HabitService {
       'completed': false,
       'createdAt': now.toIso8601String(),
       'updatedAt': now.toIso8601String(),
-      'type': data['type'] ?? 'habit', // 👈 keep type (habit or bad)
+      'type': data['type'] ?? 'habit',
       'schedule': _buildSchedule(data),
       'reminderEnabled': data['reminderOn'] ?? false,
       'reminderTime': data['reminderTime'],
@@ -59,7 +59,7 @@ class HabitService {
       'completed': false,
       'createdAt': now.toIso8601String(),
       'updatedAt': now.toIso8601String(),
-      'type': 'task', // 👈 ensure tasks are tasks
+      'type': 'task',
       'dueDate':
           data['endDate'] ?? now.add(const Duration(days: 1)).toIso8601String(),
       'schedule': _buildSchedule(data),
@@ -74,7 +74,7 @@ class HabitService {
       await _createTaskAlarm(task);
     }
 
-    _syncTaskToBackend(task); // fire-and-forget
+    _syncTaskToBackend(task);
     return task;
   }
 
@@ -84,16 +84,14 @@ class HabitService {
       String id, Map<String, dynamic> data) async {
     final habits = await _storage.getAllHabits();
     final idx = habits.indexWhere((h) => h['id'] == id);
-    if (idx == -1) {
-      throw Exception('Habit not found: $id');
-    }
+    if (idx == -1) throw Exception('Habit not found: $id');
 
     final existing = Map<String, dynamic>.from(habits[idx]);
     final updated = {
       ...existing,
       ...data,
       'id': id,
-      'type': data['type'] ?? existing['type'], // 👈 preserve type
+      'type': data['type'] ?? existing['type'],
       'updatedAt': DateTime.now().toIso8601String(),
     };
 
@@ -122,16 +120,18 @@ class HabitService {
 
   // ---------- DELETE ----------
 
+  Future<void> deleteHabit(String id) async {
+    // ✅ legacy support — redirects to deleteItem
+    await deleteItem(id);
+  }
+
   Future<void> deleteItem(String id, {String? type}) async {
-    // remove local
     await _storage.deleteHabit(id);
 
-    // cancel alarms
     try {
       await _alarms.cancelAlarm(id);
     } catch (_) {}
 
-    // remove remote
     final t = type ?? (await _findType(id));
     try {
       if (t == 'task') {
@@ -146,8 +146,6 @@ class HabitService {
 
   Future<List<Map<String, dynamic>>> getAllHabits() =>
       _storage.getAllHabits();
-  Future<List<Map<String, dynamic>>> getTodayHabits() =>
-      getHabitsForDate(DateTime.now());
 
   Future<List<Map<String, dynamic>>> getHabitsForDate(DateTime date) async {
     final allHabits = await _storage.getAllHabits();
@@ -191,7 +189,6 @@ class HabitService {
     final today = DateTime(now.year, now.month, now.day);
 
     Map<String, dynamic> schedule;
-
     if (frequency == 'daily') {
       schedule = {
         'startDate': data['startDate'] ?? today.toIso8601String(),
@@ -242,24 +239,24 @@ class HabitService {
     final startDateStr = schedule['startDate'] as String?;
     if (startDateStr != null) {
       final startDate = DateTime.parse(startDateStr);
-      final s = DateTime(startDate.year, startDate.month, startDate.day);
-      if (d.isBefore(s)) return false;
+      if (d.isBefore(DateTime(startDate.year, startDate.month, startDate.day))) {
+        return false;
+      }
     }
 
     final endDateStr = schedule['endDate'] as String?;
     if (endDateStr != null && endDateStr.isNotEmpty) {
       final endDate = DateTime.parse(endDateStr);
-      final e = DateTime(endDate.year, endDate.month, endDate.day, 23, 59, 59);
-      if (d.isAfter(e)) return false;
+      if (d.isAfter(DateTime(endDate.year, endDate.month, endDate.day, 23, 59))) {
+        return false;
+      }
     }
 
     if (schedule['everyN'] != null) {
       final everyN = schedule['everyN'] as int? ?? 2;
-      final start =
-          DateTime.parse(startDateStr ?? DateTime.now().toIso8601String());
-      final daysSinceStart =
-          d.difference(DateTime(start.year, start.month, start.day)).inDays;
-      return daysSinceStart % everyN == 0;
+      final start = DateTime.parse(startDateStr ?? DateTime.now().toIso8601String());
+      final daysSince = d.difference(DateTime(start.year, start.month, start.day)).inDays;
+      return daysSince % everyN == 0;
     }
 
     final rawDays = schedule['daysOfWeek'];
@@ -277,25 +274,22 @@ class HabitService {
       }
     }
     if (daysOfWeek.isEmpty) daysOfWeek.addAll([1, 2, 3, 4, 5, 6, 7]);
-
     return daysOfWeek.contains(d.weekday);
   }
 
   Future<void> _createHabitAlarm(Map<String, dynamic> habit) async {
     try {
       final schedule = habit['schedule'] as Map<String, dynamic>?;
-      final daysOfWeek = (schedule?['daysOfWeek'] as List?)?.map((e) {
-            if (e is int) return e;
-            if (e is String) return int.tryParse(e);
-            if (e is num) return e.toInt();
-            return null;
-          }).whereType<int>().toList() ??
+      final daysOfWeek = (schedule?['daysOfWeek'] as List?)
+              ?.map((e) =>
+                  e is int ? e : int.tryParse(e.toString()) ?? 1)
+              .toList() ??
           [1, 2, 3, 4, 5, 6, 7];
 
       await _alarms.scheduleAlarm(
         habitId: habit['id'],
         habitName: habit['title'] ?? habit['name'],
-        time: habit['reminderTime'],
+        time: habit['reminderTime'] ?? '08:00',
         daysOfWeek: daysOfWeek,
         mentorMessage:
             '⚡ Time to complete: ${habit['title'] ?? habit['name']}',
@@ -306,34 +300,25 @@ class HabitService {
   Future<void> _createTaskAlarm(Map<String, dynamic> task) async {
     try {
       final schedule = task['schedule'] as Map<String, dynamic>?;
-      List<int> daysOfWeek = [1, 2, 3, 4, 5, 6, 7];
       final rawDays = schedule?['daysOfWeek'];
+      List<int> daysOfWeek = [1, 2, 3, 4, 5, 6, 7];
       if (rawDays is List) {
-        final parsed = <int>[];
-        for (final day in rawDays) {
-          if (day is int && day >= 1 && day <= 7) parsed.add(day);
-          else if (day is String) {
-            final d = int.tryParse(day);
-            if (d != null && d >= 1 && d <= 7) parsed.add(d);
-          } else if (day is num) {
-            final d = day.toInt();
-            if (d >= 1 && d <= 7) parsed.add(d);
-          }
-        }
-        if (parsed.isNotEmpty) daysOfWeek = parsed;
+        daysOfWeek = rawDays
+            .map((e) => e is int ? e : int.tryParse(e.toString()) ?? 1)
+            .toList();
       }
 
       await _alarms.scheduleAlarm(
         habitId: task['id'],
         habitName: task['title'] ?? task['name'],
-        time: task['reminderTime'],
+        time: task['reminderTime'] ?? '08:00',
         daysOfWeek: daysOfWeek,
         mentorMessage: '📋 Task reminder: ${task['title'] ?? task['name']}',
       );
     } catch (_) {}
   }
 
-  // ---------- REMOTE ----------
+  // ---------- REMOTE SYNC ----------
 
   void _syncHabitToBackend(Map<String, dynamic> habit) {
     _api
