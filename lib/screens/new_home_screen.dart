@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_client.dart';
 import '../services/local_storage.dart';
@@ -10,22 +9,23 @@ import '../widgets/habit_create_edit_modal.dart';
 import '../logic/habit_engine.dart';
 import '../utils/schedule.dart';
 
-class NewHabitsScreen extends StatefulWidget {
-  const NewHabitsScreen({super.key});
+/// 🧠 DrillOS — New Home Screen
+/// Fully renamed + cleaned up. Handles habit/task display, streaks, toggles, and UI.
+class NewHomeScreen extends StatefulWidget {
+  final String? refreshTrigger;
+  const NewHomeScreen({super.key, this.refreshTrigger});
 
   @override
-  State<NewHabitsScreen> createState() => _NewHabitsScreenState();
+  State<NewHomeScreen> createState() => _NewHomeScreenState();
 }
 
-class _NewHabitsScreenState extends State<NewHabitsScreen> with TickerProviderStateMixin {
+class _NewHomeScreenState extends State<NewHomeScreen> with TickerProviderStateMixin {
   List<dynamic> allItems = [];
   bool isLoading = true;
-
   DateTime selectedDate = DateTime.now();
   String filterTab = 'habits';
   bool showCreateModal = false;
   bool showSpeedDial = false;
-
   Map<String, dynamic> formData = {};
   bool isEditing = false;
 
@@ -112,7 +112,7 @@ class _NewHabitsScreenState extends State<NewHabitsScreen> with TickerProviderSt
         isLoading = false;
       });
     } catch (e) {
-      print('❌ Error loading habits: $e');
+      print('❌ Error loading data: $e');
       setState(() => isLoading = false);
     }
   }
@@ -130,7 +130,7 @@ class _NewHabitsScreenState extends State<NewHabitsScreen> with TickerProviderSt
     }).toList();
   }
 
-  /// ✅ FIXED: Toggling completion works instantly and persists
+  /// ✅ Toggle completion + streak logic
   Future<void> _toggleCompletion(String itemId, DateTime date) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -140,7 +140,7 @@ class _NewHabitsScreenState extends State<NewHabitsScreen> with TickerProviderSt
 
       await prefs.setBool(key, nowDone);
 
-      // ✅ Update streak logic
+      // update streaks
       final streakKey = 'streak:$itemId';
       int currentStreak = prefs.getInt(streakKey) ?? 0;
 
@@ -154,8 +154,6 @@ class _NewHabitsScreenState extends State<NewHabitsScreen> with TickerProviderSt
           currentStreak = 1;
         }
         await prefs.setString('lastComplete:$itemId', date.toIso8601String());
-
-        // XP
         final xpKey = 'xp:$itemId';
         final oldXp = prefs.getInt(xpKey) ?? 0;
         await prefs.setInt(xpKey, oldXp + 15);
@@ -163,7 +161,6 @@ class _NewHabitsScreenState extends State<NewHabitsScreen> with TickerProviderSt
 
       await prefs.setInt(streakKey, currentStreak);
 
-      // ✅ Update local cache and UI
       if (mounted) {
         setState(() {
           final idx = allItems.indexWhere((i) => i['id'] == itemId);
@@ -220,15 +217,14 @@ class _NewHabitsScreenState extends State<NewHabitsScreen> with TickerProviderSt
       await habitService.deleteHabit(id);
       await _loadData();
       HapticFeedback.heavyImpact();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('✅ Deleted'), duration: Duration(seconds: 1)),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('✅ Deleted'), duration: Duration(seconds: 1)));
     } catch (e) {
       print('❌ Delete error: $e');
     }
   }
 
-  // 🧱 --- UI Helpers ---
+  // --- UI ---
 
   Color _getColorForItem(dynamic item) {
     final colorName = item['color'] ?? 'emerald';
@@ -341,7 +337,6 @@ class _NewHabitsScreenState extends State<NewHabitsScreen> with TickerProviderSt
     );
   }
 
-  // 🔥 Core Card UI
   Widget _buildItemCard(dynamic item) {
     final itemColor = _getColorForItem(item);
     final itemType = item['type'] ?? 'habit';
@@ -439,19 +434,8 @@ class _NewHabitsScreenState extends State<NewHabitsScreen> with TickerProviderSt
   }
 
   String _monthName(int m) => [
-        '',
-        'Jan',
-        'Feb',
-        'Mar',
-        'Apr',
-        'May',
-        'Jun',
-        'Jul',
-        'Aug',
-        'Sep',
-        'Oct',
-        'Nov',
-        'Dec'
+        '', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+        'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
       ][m];
   String _dayAbbr(int d) => ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][d - 1];
 
