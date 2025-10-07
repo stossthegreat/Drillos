@@ -5,9 +5,9 @@ import 'api_client.dart';
 import 'alarm_service.dart';
 
 /// 🎯 Habit Service - Complete offline-first habit management
-/// 
-/// Creates, updates, deletes habits locally FIRST, then syncs to backend.
-/// This ensures instant UI updates and offline functionality.
+/// - All CRUD is local-first for instant UI
+/// - Scheduling logic lives here (start/end/daysOfWeek/everyN)
+/// - Streak/XP & per-day completion stored in SharedPreferences via LocalStorage
 class HabitService {
   static final HabitService _instance = HabitService._internal();
   factory HabitService() => _instance;
@@ -20,13 +20,9 @@ class HabitService {
 
   /// ✅ Create a new habit (OFFLINE-FIRST)
   Future<Map<String, dynamic>> createHabit(Map<String, dynamic> data) async {
-    print('🎯 Creating habit locally...');
-    
-    // Generate local ID
     final habitId = _uuid.v4();
     final now = DateTime.now();
-    
-    // Build habit object
+
     final habit = {
       'id': habitId,
       'title': data['name'] ?? data['title'] ?? 'New Habit',
@@ -44,29 +40,21 @@ class HabitService {
       'intensity': data['intensity'] ?? 2,
     };
 
-    // Save locally FIRST
     await _storage.saveHabit(habit);
-    print('✅ Habit saved locally: ${habit['title']}');
-    print('📋 Saved schedule: ${habit['schedule']}');
 
-    // Create alarm if reminder is enabled
     if (habit['reminderEnabled'] == true && habit['reminderTime'] != null) {
       await _createHabitAlarm(habit);
     }
 
-    // Sync to backend (fire-and-forget)
-    _syncHabitToBackend(habit);
-
+    _syncHabitToBackend(habit); // fire-and-forget
     return habit;
   }
 
   /// ✅ Create a new task (OFFLINE-FIRST)
   Future<Map<String, dynamic>> createTask(Map<String, dynamic> data) async {
-    print('🎯 Creating task locally...');
-    
     final taskId = _uuid.v4();
     final now = DateTime.now();
-    
+
     final task = {
       'id': taskId,
       'title': data['name'] ?? data['title'] ?? 'New Task',
@@ -83,54 +71,35 @@ class HabitService {
       'priority': data['intensity'] ?? 2,
     };
 
-    // Save locally
-    await _storage.saveHabit(task); // Using same storage method
-    print('✅ Task saved locally: ${task['title']}');
+    await _storage.saveHabit(task);
 
-    // Create alarm if reminder is enabled
     if (task['reminderEnabled'] == true && task['reminderTime'] != null) {
       await _createTaskAlarm(task);
     }
 
-    // Sync to backend
-    _syncTaskToBackend(task);
-
+    _syncTaskToBackend(task); // fire-and-forget
     return task;
   }
 
-  /// ✅ Update a habit
+  /// ✅ Update a habit/task
   Future<Map<String, dynamic>> updateHabit(String id, Map<String, dynamic> data) async {
-    print('🎯 Updating habit locally: $id');
-    
-    // Get existing habit
     final habits = await _storage.getAllHabits();
-    final existing = habits.firstWhere(
-      (h) => h['id'] == id,
-      orElse: () => <String, dynamic>{},
-    );
+    final existing = habits.firstWhere((h) => h['id'] == id, orElse: () => <String, dynamic>{});
+    if (existing.isEmpty) throw Exception('Habit not found: $id');
 
-    if (existing.isEmpty) {
-      throw Exception('Habit not found: $id');
-    }
-
-    // Merge updates
     final updated = {
       ...existing,
       ...data,
-      'id': id, // Preserve ID
+      'id': id,
       'updatedAt': DateTime.now().toIso8601String(),
     };
 
-    // Update schedule if provided
     if (data.containsKey('name') || data.containsKey('schedule') || data.containsKey('frequency')) {
-      updated['schedule'] = _buildSchedule(data);
+      updated['schedule'] = _buildSchedule({...existing, ...data});
     }
 
-    // Save locally
     await _storage.saveHabit(updated);
-    print('✅ Habit updated locally');
 
-    // Update alarm if reminder settings changed
     if (data.containsKey('reminderOn') || data.containsKey('reminderTime')) {
       if (updated['reminderEnabled'] == true && updated['reminderTime'] != null) {
         await _createHabitAlarm(updated);
@@ -139,92 +108,48 @@ class HabitService {
       }
     }
 
-    // Sync to backend
-    _syncHabitToBackend(updated);
-
+    _syncHabitToBackend(updated); // fire-and-forget
     return updated;
   }
 
-  /// ✅ Delete a habit
+  /// ✅ Delete a habit/task
   Future<void> deleteHabit(String id) async {
-    print('🗑️ HabitService.deleteHabit called for: $id');
-    
-    // Delete locally
-    print('🗑️ Deleting from local storage...');
     await _storage.deleteHabit(id);
-    print('✅ Deleted from local storage');
-    
-    // Cancel any alarms (wrapped in try-catch to prevent delete failure)
-    print('🔔 Cancelling alarms...');
     try {
       await _alarms.cancelAlarm(id);
-      print('✅ Alarms cancelled');
-    } catch (e) {
-      print('⚠️ Failed to cancel alarms (OK, continuing): $e');
-    }
-    
-    // Delete from backend (fire-and-forget)
-    print('🌐 Syncing delete to backend...');
+    } catch (_) {}
     try {
       await _api.deleteHabit(id);
-      print('✅ Habit deleted from backend');
-    } catch (e) {
-      print('⚠️ Failed to delete from backend (OK, it\'s local-first): $e');
-    }
-    
-    print('✅ HabitService.deleteHabit complete for: $id');
+    } catch (_) {}
   }
 
-  /// ✅ Get all habits
-  Future<List<Map<String, dynamic>>> getAllHabits() async {
-    return await _storage.getAllHabits();
-  }
+  /// ✅ Get all (raw)
+  Future<List<Map<String, dynamic>>> getAllHabits() => _storage.getAllHabits();
 
-  /// ✅ Get today's habits (filtered by schedule)
-  Future<List<Map<String, dynamic>>> getTodayHabits() async {
+  /// ✅ Get habits filtered for *today* (legacy keep)
+  Future<List<Map<String, dynamic>>> getTodayHabits() => getHabitsForDate(DateTime.now());
+
+  /// ✅ Get habits filtered for ANY date (Home calendar uses this)
+  Future<List<Map<String, dynamic>>> getHabitsForDate(DateTime date) async {
     final allHabits = await _storage.getAllHabits();
-    final today = DateTime.now();
-    final todayHabits = <Map<String, dynamic>>[];
-
+    final result = <Map<String, dynamic>>[];
 
     for (final habit in allHabits) {
-      print('🔍 Checking habit: ${habit['title']}, type: ${habit['type']}');
-      print('🔍 Habit schedule: ${habit['schedule']}');
-      
-      if (habit['type'] == 'task') {
-        // Tasks now use schedule just like habits
-        final schedule = habit['schedule'] as Map<String, dynamic>?;
-        final isScheduled = schedule == null ? true : _isActiveOn(schedule, today);
-        print('🔍 Task scheduled for today: $isScheduled');
-        if (!isScheduled) continue;
-
-        // Completion is tracked per-day locally
-        final completedToday = await _storage.isCompletedOn(habit['id'], today);
-        if (!completedToday) {
-          todayHabits.add({
-            ...Map<String, dynamic>.from(habit),
-            'completed': false,
-          });
-        }
-        continue;
-      }
-
-      // Check if habit is scheduled for today
       final schedule = habit['schedule'] as Map<String, dynamic>?;
-      if (schedule == null) {
-        print('🔍 Habit has no schedule, adding to today');
-        todayHabits.add(habit);
-        continue;
-      }
 
-      final isActive = _isActiveOn(schedule, today);
-      print('🔍 Habit active today: $isActive');
-      if (isActive) {
-        // Load completion status
-        final completed = await _storage.isCompletedOn(habit['id'], today);
+      final isActive = schedule == null ? true : _isActiveOn(schedule, date);
+      if (!isActive) continue;
+
+      final completed = await _storage.isCompletedOn(habit['id'], date);
+
+      if (habit['type'] == 'task') {
+        result.add({
+          ...Map<String, dynamic>.from(habit),
+          'completed': completed,
+        });
+      } else {
         final streak = await _storage.getStreak(habit['id']);
-        
-        todayHabits.add({
+        result.add({
           ...Map<String, dynamic>.from(habit),
           'completed': completed,
           'streak': streak,
@@ -232,7 +157,7 @@ class HabitService {
       }
     }
 
-    return todayHabits;
+    return result;
   }
 
   // ========== PRIVATE HELPERS ==========
@@ -243,7 +168,7 @@ class HabitService {
     final today = DateTime(now.year, now.month, now.day);
 
     Map<String, dynamic> schedule;
-    
+
     if (frequency == 'daily') {
       schedule = {
         'startDate': data['startDate'] ?? today.toIso8601String(),
@@ -263,12 +188,11 @@ class HabitService {
         'daysOfWeek': [6, 7],
       };
     } else if (frequency == 'everyN') {
-      // For everyN, we'll use a custom approach - store the interval
       final everyN = data['everyN'] ?? 2;
       schedule = {
         'startDate': data['startDate'] ?? today.toIso8601String(),
         'endDate': data['endDate'],
-        'daysOfWeek': [1, 2, 3, 4, 5, 6, 7], // All days, but we'll check interval
+        'daysOfWeek': [1, 2, 3, 4, 5, 6, 7], // use everyN filter below
         'everyN': everyN,
         'lastCompleted': null,
       };
@@ -279,83 +203,66 @@ class HabitService {
         'daysOfWeek': data['daysOfWeek'],
       };
     } else {
-      // Default to daily
       schedule = {
         'startDate': data['startDate'] ?? today.toIso8601String(),
         'endDate': data['endDate'],
         'daysOfWeek': [1, 2, 3, 4, 5, 6, 7],
       };
     }
-    
-    print('📅 Built schedule: frequency=$frequency, daysOfWeek=${schedule['daysOfWeek']}');
+
     return schedule;
   }
 
   bool _isActiveOn(Map<String, dynamic> schedule, DateTime date) {
     final d = DateTime(date.year, date.month, date.day);
-    
-    // Check start date
+
     final startDateStr = schedule['startDate'] as String?;
     if (startDateStr != null) {
       final startDate = DateTime.parse(startDateStr);
       final s = DateTime(startDate.year, startDate.month, startDate.day);
       if (d.isBefore(s)) return false;
     }
-    
-    // Check end date
+
     final endDateStr = schedule['endDate'] as String?;
     if (endDateStr != null && endDateStr.isNotEmpty) {
       final endDate = DateTime.parse(endDateStr);
       final e = DateTime(endDate.year, endDate.month, endDate.day, 23, 59, 59);
       if (d.isAfter(e)) return false;
     }
-    
-    // Handle everyN schedule
+
     if (schedule['everyN'] != null) {
       final everyN = schedule['everyN'] as int? ?? 2;
-      final startDate = DateTime.parse(startDateStr ?? DateTime.now().toIso8601String());
-      final daysSinceStart = d.difference(DateTime(startDate.year, startDate.month, startDate.day)).inDays;
-      final isActive = daysSinceStart % everyN == 0;
-      print('🔍 EveryN check: daysSinceStart=$daysSinceStart, everyN=$everyN, active=$isActive');
-      return isActive;
+      final start = DateTime.parse(startDateStr ?? DateTime.now().toIso8601String());
+      final daysSinceStart =
+          d.difference(DateTime(start.year, start.month, start.day)).inDays;
+      return daysSinceStart % everyN == 0;
     }
-    
-    // ✅ FIX: Robust parsing of daysOfWeek from JSON
+
     final rawDays = schedule['daysOfWeek'];
     final daysOfWeek = <int>[];
-    
     if (rawDays is List) {
       for (final day in rawDays) {
         if (day is int && day >= 1 && day <= 7) {
           daysOfWeek.add(day);
         } else if (day is String) {
           final parsed = int.tryParse(day);
-          if (parsed != null && parsed >= 1 && parsed <= 7) {
-            daysOfWeek.add(parsed);
-          }
+          if (parsed != null && parsed >= 1 && parsed <= 7) daysOfWeek.add(parsed);
         } else if (day is num) {
           final intDay = day.toInt();
-          if (intDay >= 1 && intDay <= 7) {
-            daysOfWeek.add(intDay);
-          }
+          if (intDay >= 1 && intDay <= 7) daysOfWeek.add(intDay);
         }
       }
     }
-    
-    // Default to all days if empty
-    if (daysOfWeek.isEmpty) {
-      daysOfWeek.addAll([1, 2, 3, 4, 5, 6, 7]);
-    }
-    
-    print('🔍 Schedule check: date=${d.weekday}, daysOfWeek=$daysOfWeek, active=${daysOfWeek.contains(d.weekday)}');
+    if (daysOfWeek.isEmpty) daysOfWeek.addAll([1, 2, 3, 4, 5, 6, 7]);
+
     return daysOfWeek.contains(d.weekday);
   }
 
   Future<void> _createHabitAlarm(Map<String, dynamic> habit) async {
     try {
-      final timeParts = (habit['reminderTime'] as String).split(':');
       final schedule = habit['schedule'] as Map<String, dynamic>?;
-      final daysOfWeek = (schedule?['daysOfWeek'] as List?)?.cast<int>() ?? [1, 2, 3, 4, 5, 6, 7];
+      final daysOfWeek = (schedule?['daysOfWeek'] as List?)?.cast<int>() ??
+          [1, 2, 3, 4, 5, 6, 7];
 
       await _alarms.scheduleAlarm(
         habitId: habit['id'],
@@ -364,15 +271,11 @@ class HabitService {
         daysOfWeek: daysOfWeek,
         mentorMessage: '⚡ Time to complete: ${habit['title'] ?? habit['name']}',
       );
-      print('✅ Created alarm for habit');
-    } catch (e) {
-      print('❌ Error creating habit alarm: $e');
-    }
+    } catch (_) {}
   }
 
   Future<void> _createTaskAlarm(Map<String, dynamic> task) async {
     try {
-      // Use schedule days if available; otherwise default to all days
       final schedule = task['schedule'] as Map<String, dynamic>?;
       List<int> daysOfWeek = [1, 2, 3, 4, 5, 6, 7];
       final rawDays = schedule?['daysOfWeek'];
@@ -398,18 +301,14 @@ class HabitService {
         daysOfWeek: daysOfWeek,
         mentorMessage: '📋 Task reminder: ${task['title'] ?? task['name']}',
       );
-      print('✅ Created alarm for task');
-    } catch (e) {
-      print('❌ Error creating task alarm: $e');
-    }
+    } catch (_) {}
   }
 
-  /// ✅ Mark a task as completed locally for today (instant UI)
+  /// ✅ Mark a task as completed locally for a date
   Future<void> completeTaskLocal(String taskId, {DateTime? when}) async {
     final date = when ?? DateTime.now();
     await _storage.markCompleted(taskId, date);
 
-    // Also update task object 'completed' flag to help UI lists that depend on it
     final items = await _storage.getAllHabits();
     final index = items.indexWhere((i) => i['id'] == taskId);
     if (index >= 0) {
@@ -422,36 +321,26 @@ class HabitService {
     }
   }
 
+  // ---- Backend sync (fire-and-forget) ----
   void _syncHabitToBackend(Map<String, dynamic> habit) {
-    // Fire-and-forget sync
     _api.createHabit({
       'title': habit['title'] ?? habit['name'],
       'schedule': habit['schedule'],
       'color': habit['color'],
       'reminderEnabled': habit['reminderEnabled'],
       'reminderTime': habit['reminderTime'],
-    }).then((response) {
-      print('✅ Habit synced to backend: ${habit['title']}');
-    }).catchError((e) {
-      print('⚠️ Failed to sync habit to backend: $e');
-    });
+    }).catchError((_) {});
   }
 
   void _syncTaskToBackend(Map<String, dynamic> task) {
-    // Fire-and-forget sync
     _api.createTask({
       'title': task['title'] ?? task['name'],
       'dueDate': task['dueDate'],
       'description': task['description'] ?? '',
       'priority': task['priority'],
       'color': task['color'],
-    }).then((response) {
-      print('✅ Task synced to backend: ${task['title']}');
-    }).catchError((e) {
-      print('⚠️ Failed to sync task to backend: $e');
-    });
+    }).catchError((_) {});
   }
 }
 
 final habitService = HabitService();
-
