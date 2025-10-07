@@ -12,7 +12,7 @@ import 'widgets/root_shell.dart';
 import 'screens/onboarding_screen.dart';
 import 'screens/habit_detail_screen.dart';
 import 'screens/anti_habit_detail_screen.dart';
-import 'screens/alarm_page.dart'; // ✅ make sure this file exists
+import 'screens/alarm_screen.dart'; // ✅ correct import for AlarmScreen
 import 'services/api_client.dart';
 import 'services/alarm_service.dart';
 
@@ -30,7 +30,7 @@ Future<void> main() async {
     apiClient.setBaseUrl(apiUrl);
   }
 
-  // 🔔 Initialize alarm service (safe)
+  // 🔔 Initialize alarm service safely
   try {
     await alarmService.init();
     await alarmService.requestPermissions();
@@ -74,8 +74,9 @@ class DrillSergeantApp extends StatelessWidget {
           routes: [
             GoRoute(
               path: '/home',
-              builder: (context, state) =>
-                  NewHomeScreen(refreshTrigger: state.uri.queryParameters['refresh']),
+              builder: (context, state) => NewHomeScreen(
+                refreshTrigger: state.uri.queryParameters['refresh'],
+              ),
             ),
             GoRoute(
               path: '/habits',
@@ -86,8 +87,8 @@ class DrillSergeantApp extends StatelessWidget {
               builder: (context, state) => const StreaksScreen(),
             ),
             GoRoute(
-              path: '/alarm', // ✅ new alarm tab route
-              builder: (context, state) => AlarmPage(),
+              path: '/alarm', // ✅ new alarm tab
+              builder: (context, state) => const AlarmScreen(),
             ),
             GoRoute(
               path: '/settings',
@@ -95,8 +96,9 @@ class DrillSergeantApp extends StatelessWidget {
             ),
             GoRoute(
               path: '/home-old',
-              builder: (context, state) =>
-                  HomeScreen(refreshTrigger: state.uri.queryParameters['refresh']),
+              builder: (context, state) => HomeScreen(
+                refreshTrigger: state.uri.queryParameters['refresh'],
+              ),
             ),
             GoRoute(
               path: '/habits-old',
