@@ -1,13 +1,9 @@
-import 'dart:convert';
 import 'package:uuid/uuid.dart';
 import 'local_storage.dart';
 import 'api_client.dart';
 import 'alarm_service.dart';
 
-/// 🎯 Habit Service - Complete offline-first habit management
-/// - All CRUD is local-first for instant UI
-/// - Scheduling logic lives here (start/end/daysOfWeek/everyN)
-/// - Streak/XP & per-day completion stored in SharedPreferences via LocalStorage
+/// Offline-first Habit/Task service
 class HabitService {
   static final HabitService _instance = HabitService._internal();
   factory HabitService() => _instance;
@@ -18,13 +14,14 @@ class HabitService {
   final _alarms = alarmService;
   final _uuid = const Uuid();
 
-  /// ✅ Create a new habit (OFFLINE-FIRST)
+  // ---------- CREATE ----------
+
   Future<Map<String, dynamic>> createHabit(Map<String, dynamic> data) async {
-    final habitId = _uuid.v4();
+    final id = _uuid.v4();
     final now = DateTime.now();
 
     final habit = {
-      'id': habitId,
+      'id': id,
       'title': data['name'] ?? data['title'] ?? 'New Habit',
       'name': data['name'] ?? data['title'] ?? 'New Habit',
       'color': data['color'] ?? 'emerald',
@@ -33,7 +30,7 @@ class HabitService {
       'completed': false,
       'createdAt': now.toIso8601String(),
       'updatedAt': now.toIso8601String(),
-      'type': 'habit',
+      'type': data['type'] ?? 'habit', // 👈 keep type (habit or bad)
       'schedule': _buildSchedule(data),
       'reminderEnabled': data['reminderOn'] ?? false,
       'reminderTime': data['reminderTime'],
@@ -50,21 +47,21 @@ class HabitService {
     return habit;
   }
 
-  /// ✅ Create a new task (OFFLINE-FIRST)
   Future<Map<String, dynamic>> createTask(Map<String, dynamic> data) async {
-    final taskId = _uuid.v4();
+    final id = _uuid.v4();
     final now = DateTime.now();
 
     final task = {
-      'id': taskId,
+      'id': id,
       'title': data['name'] ?? data['title'] ?? 'New Task',
       'name': data['name'] ?? data['title'] ?? 'New Task',
       'color': data['color'] ?? 'blue',
       'completed': false,
       'createdAt': now.toIso8601String(),
       'updatedAt': now.toIso8601String(),
-      'type': 'task',
-      'dueDate': data['endDate'] ?? now.add(const Duration(days: 1)).toIso8601String(),
+      'type': 'task', // 👈 ensure tasks are tasks
+      'dueDate':
+          data['endDate'] ?? now.add(const Duration(days: 1)).toIso8601String(),
       'schedule': _buildSchedule(data),
       'reminderEnabled': data['reminderOn'] ?? false,
       'reminderTime': data['reminderTime'],
@@ -81,62 +78,83 @@ class HabitService {
     return task;
   }
 
-  /// ✅ Update a habit/task
-  Future<Map<String, dynamic>> updateHabit(String id, Map<String, dynamic> data) async {
-    final habits = await _storage.getAllHabits();
-    final existing = habits.firstWhere((h) => h['id'] == id, orElse: () => <String, dynamic>{});
-    if (existing.isEmpty) throw Exception('Habit not found: $id');
+  // ---------- UPDATE ----------
 
+  Future<Map<String, dynamic>> updateHabit(
+      String id, Map<String, dynamic> data) async {
+    final habits = await _storage.getAllHabits();
+    final idx = habits.indexWhere((h) => h['id'] == id);
+    if (idx == -1) {
+      throw Exception('Habit not found: $id');
+    }
+
+    final existing = Map<String, dynamic>.from(habits[idx]);
     final updated = {
       ...existing,
       ...data,
       'id': id,
+      'type': data['type'] ?? existing['type'], // 👈 preserve type
       'updatedAt': DateTime.now().toIso8601String(),
     };
 
-    if (data.containsKey('name') || data.containsKey('schedule') || data.containsKey('frequency')) {
+    if (data.containsKey('name') ||
+        data.containsKey('schedule') ||
+        data.containsKey('frequency') ||
+        data.containsKey('daysOfWeek') ||
+        data.containsKey('everyN')) {
       updated['schedule'] = _buildSchedule({...existing, ...data});
     }
 
     await _storage.saveHabit(updated);
 
     if (data.containsKey('reminderOn') || data.containsKey('reminderTime')) {
-      if (updated['reminderEnabled'] == true && updated['reminderTime'] != null) {
+      if (updated['reminderEnabled'] == true &&
+          updated['reminderTime'] != null) {
         await _createHabitAlarm(updated);
       } else {
         await _alarms.cancelAlarm(id);
       }
     }
 
-    _syncHabitToBackend(updated); // fire-and-forget
+    _syncHabitToBackend(updated);
     return updated;
   }
 
-  /// ✅ Delete a habit/task
-  Future<void> deleteHabit(String id) async {
+  // ---------- DELETE ----------
+
+  Future<void> deleteItem(String id, {String? type}) async {
+    // remove local
     await _storage.deleteHabit(id);
+
+    // cancel alarms
     try {
       await _alarms.cancelAlarm(id);
     } catch (_) {}
+
+    // remove remote
+    final t = type ?? (await _findType(id));
     try {
-      await _api.deleteHabit(id);
+      if (t == 'task') {
+        await _api.deleteTask(id);
+      } else {
+        await _api.deleteHabit(id);
+      }
     } catch (_) {}
   }
 
-  /// ✅ Get all (raw)
-  Future<List<Map<String, dynamic>>> getAllHabits() => _storage.getAllHabits();
+  // ---------- READ ----------
 
-  /// ✅ Get habits filtered for *today* (legacy keep)
-  Future<List<Map<String, dynamic>>> getTodayHabits() => getHabitsForDate(DateTime.now());
+  Future<List<Map<String, dynamic>>> getAllHabits() =>
+      _storage.getAllHabits();
+  Future<List<Map<String, dynamic>>> getTodayHabits() =>
+      getHabitsForDate(DateTime.now());
 
-  /// ✅ Get habits filtered for ANY date (Home calendar uses this)
   Future<List<Map<String, dynamic>>> getHabitsForDate(DateTime date) async {
     final allHabits = await _storage.getAllHabits();
     final result = <Map<String, dynamic>>[];
 
     for (final habit in allHabits) {
       final schedule = habit['schedule'] as Map<String, dynamic>?;
-
       final isActive = schedule == null ? true : _isActiveOn(schedule, date);
       if (!isActive) continue;
 
@@ -160,7 +178,12 @@ class HabitService {
     return result;
   }
 
-  // ========== PRIVATE HELPERS ==========
+  // ---------- HELPERS ----------
+
+  Future<String?> _findType(String id) async {
+    final all = await _storage.getAllHabits();
+    return all.firstWhere((e) => e['id'] == id, orElse: () => {})['type'];
+  }
 
   Map<String, dynamic> _buildSchedule(Map<String, dynamic> data) {
     final frequency = data['frequency'] ?? 'daily';
@@ -192,7 +215,7 @@ class HabitService {
       schedule = {
         'startDate': data['startDate'] ?? today.toIso8601String(),
         'endDate': data['endDate'],
-        'daysOfWeek': [1, 2, 3, 4, 5, 6, 7], // use everyN filter below
+        'daysOfWeek': [1, 2, 3, 4, 5, 6, 7],
         'everyN': everyN,
         'lastCompleted': null,
       };
@@ -232,7 +255,8 @@ class HabitService {
 
     if (schedule['everyN'] != null) {
       final everyN = schedule['everyN'] as int? ?? 2;
-      final start = DateTime.parse(startDateStr ?? DateTime.now().toIso8601String());
+      final start =
+          DateTime.parse(startDateStr ?? DateTime.now().toIso8601String());
       final daysSinceStart =
           d.difference(DateTime(start.year, start.month, start.day)).inDays;
       return daysSinceStart % everyN == 0;
@@ -242,9 +266,8 @@ class HabitService {
     final daysOfWeek = <int>[];
     if (rawDays is List) {
       for (final day in rawDays) {
-        if (day is int && day >= 1 && day <= 7) {
-          daysOfWeek.add(day);
-        } else if (day is String) {
+        if (day is int && day >= 1 && day <= 7) daysOfWeek.add(day);
+        else if (day is String) {
           final parsed = int.tryParse(day);
           if (parsed != null && parsed >= 1 && parsed <= 7) daysOfWeek.add(parsed);
         } else if (day is num) {
@@ -261,7 +284,12 @@ class HabitService {
   Future<void> _createHabitAlarm(Map<String, dynamic> habit) async {
     try {
       final schedule = habit['schedule'] as Map<String, dynamic>?;
-      final daysOfWeek = (schedule?['daysOfWeek'] as List?)?.cast<int>() ??
+      final daysOfWeek = (schedule?['daysOfWeek'] as List?)?.map((e) {
+            if (e is int) return e;
+            if (e is String) return int.tryParse(e);
+            if (e is num) return e.toInt();
+            return null;
+          }).whereType<int>().toList() ??
           [1, 2, 3, 4, 5, 6, 7];
 
       await _alarms.scheduleAlarm(
@@ -269,7 +297,8 @@ class HabitService {
         habitName: habit['title'] ?? habit['name'],
         time: habit['reminderTime'],
         daysOfWeek: daysOfWeek,
-        mentorMessage: '⚡ Time to complete: ${habit['title'] ?? habit['name']}',
+        mentorMessage:
+            '⚡ Time to complete: ${habit['title'] ?? habit['name']}',
       );
     } catch (_) {}
   }
@@ -304,42 +333,31 @@ class HabitService {
     } catch (_) {}
   }
 
-  /// ✅ Mark a task as completed locally for a date
-  Future<void> completeTaskLocal(String taskId, {DateTime? when}) async {
-    final date = when ?? DateTime.now();
-    await _storage.markCompleted(taskId, date);
+  // ---------- REMOTE ----------
 
-    final items = await _storage.getAllHabits();
-    final index = items.indexWhere((i) => i['id'] == taskId);
-    if (index >= 0) {
-      items[index] = {
-        ...items[index],
-        'completed': true,
-        'updatedAt': DateTime.now().toIso8601String(),
-      };
-      await _storage.saveAllHabits(items);
-    }
-  }
-
-  // ---- Backend sync (fire-and-forget) ----
   void _syncHabitToBackend(Map<String, dynamic> habit) {
-    _api.createHabit({
-      'title': habit['title'] ?? habit['name'],
-      'schedule': habit['schedule'],
-      'color': habit['color'],
-      'reminderEnabled': habit['reminderEnabled'],
-      'reminderTime': habit['reminderTime'],
-    }).catchError((_) {});
+    _api
+        .createHabit({
+          'title': habit['title'] ?? habit['name'],
+          'schedule': habit['schedule'],
+          'color': habit['color'],
+          'reminderEnabled': habit['reminderEnabled'],
+          'reminderTime': habit['reminderTime'],
+          'type': habit['type'],
+        })
+        .catchError((_) {});
   }
 
   void _syncTaskToBackend(Map<String, dynamic> task) {
-    _api.createTask({
-      'title': task['title'] ?? task['name'],
-      'dueDate': task['dueDate'],
-      'description': task['description'] ?? '',
-      'priority': task['priority'],
-      'color': task['color'],
-    }).catchError((_) {});
+    _api
+        .createTask({
+          'title': task['title'] ?? task['name'],
+          'dueDate': task['dueDate'],
+          'description': task['description'] ?? '',
+          'priority': task['priority'],
+          'color': task['color'],
+        })
+        .catchError((_) {});
   }
 }
 
