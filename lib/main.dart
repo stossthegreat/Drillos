@@ -16,12 +16,11 @@ import 'screens/anti_habit_detail_screen.dart';
 import 'services/api_client.dart';
 import 'services/alarm_service.dart';
 
-/// 👉 Change this to the specific time you want your test alarm to fire
-/// Use 24-hour format, e.g. "08:00" = 8 AM, "20:30" = 8:30 PM
 const String kDailyTestAlarmTime = "08:00";
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  print('✅ DrillOS starting...');
 
   // 🌐 Configure API endpoint
   const apiUrl = String.fromEnvironment('API_BASE_URL', defaultValue: '');
@@ -31,18 +30,21 @@ Future<void> main() async {
     apiClient.setBaseUrl(apiUrl);
   }
 
-  // 🔔 Initialize alarm service (local only)
-  await alarmService.init();
-  await alarmService.requestPermissions();
-
-  // ✅ Schedule a daily test alarm (for verification)
-  await alarmService.scheduleAlarm(
-    habitId: '__test_alarm__',
-    habitName: 'Test Alarm',
-    time: kDailyTestAlarmTime,
-    daysOfWeek: const [1, 2, 3, 4, 5, 6, 7],
-    mentorMessage: '🔔 DrillOS test alarm fired successfully!',
-  );
+  // 🔔 Initialize alarm service (safe)
+  try {
+    await alarmService.init();
+    await alarmService.requestPermissions();
+    await alarmService.scheduleAlarm(
+      habitId: '__test_alarm__',
+      habitName: 'Test Alarm',
+      time: kDailyTestAlarmTime,
+      daysOfWeek: const [1, 2, 3, 4, 5, 6, 7],
+      mentorMessage: 'DrillOS test alarm fired successfully!',
+    );
+    print('✅ Test alarm scheduled');
+  } catch (e) {
+    print('⚠️ Alarm init failed: $e');
+  }
 
   runApp(const DrillSergeantApp());
 }
@@ -52,6 +54,7 @@ class DrillSergeantApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    print('🧭 GoRouter initialized');
     final router = GoRouter(
       initialLocation: '/onboarding',
       routes: [
@@ -115,13 +118,41 @@ class DrillSergeantApp extends StatelessWidget {
           ],
         ),
       ],
-    ); // ✅ everything now closed properly
+      errorBuilder: (context, state) {
+        return Scaffold(
+          backgroundColor: Colors.black,
+          body: Center(
+            child: Text(
+              '⚠️ Route not found: ${state.error}',
+              style: const TextStyle(color: Colors.white),
+              textAlign: TextAlign.center,
+            ),
+          ),
+        );
+      },
+    );
 
     return MaterialApp.router(
       title: 'Drill OS',
       debugShowCheckedModeBanner: false,
       theme: buildDarkTheme(),
       routerConfig: router,
+      builder: (context, child) {
+        // ✅ Safety fallback to prevent black screen
+        return Directionality(
+          textDirection: TextDirection.ltr,
+          child: child ??
+              const Scaffold(
+                backgroundColor: Colors.black,
+                body: Center(
+                  child: Text(
+                    '⚠️ Failed to load route',
+                    style: TextStyle(color: Colors.white),
+                  ),
+                ),
+              ),
+        );
+      },
     );
   }
 }
