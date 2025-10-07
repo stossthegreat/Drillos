@@ -4,6 +4,7 @@ import 'design/theme.dart';
 import 'screens/home_screen.dart';
 import 'screens/new_home_screen.dart';
 import 'screens/habits_screen.dart';
+// ✅ remove duplicate import – only this one
 import 'screens/new_habits_screen.dart';
 import 'screens/streaks_screen.dart';
 import 'screens/chat_screen.dart';
@@ -18,18 +19,13 @@ import 'services/api_client.dart';
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // 🌐 Setup API base URL
+  // 🌐 Configure API URL
   const apiUrl = String.fromEnvironment('API_BASE_URL', defaultValue: '');
-  print('🌐 Environment API_BASE_URL: "$apiUrl"');
-  print('🌐 ApiClient baseUrl before override: "${apiClient.getBaseUrl()}"');
-
   if (apiUrl.isEmpty) {
     apiClient.setBaseUrl('https://drillos-production.up.railway.app');
   } else {
     apiClient.setBaseUrl(apiUrl);
   }
-
-  print('🌐 Final ApiClient baseUrl: "${apiClient.getBaseUrl()}"');
 
   runApp(const DrillSergeantApp());
 }
@@ -42,46 +38,41 @@ class DrillSergeantApp extends StatelessWidget {
     final router = GoRouter(
       initialLocation: '/onboarding',
       routes: [
-        // 🎨 Design preview
         GoRoute(
           path: '/design',
           builder: (context, state) => const DesignGallery(),
         ),
-
-        // 🚀 Onboarding flow
         GoRoute(
           path: '/onboarding',
           builder: (context, state) => DrillOSOnboarding(
             onComplete: () => context.go('/home'),
           ),
         ),
-
-        // 🏠 Root shell (bottom navigation)
         ShellRoute(
           builder: (context, state, child) => RootShell(child: child),
           routes: [
-            // ✅ NEW SCREENS
             GoRoute(
               path: '/home',
-              builder: (context, state) => const NewHomeScreen(),
+              // ❌ remove const
+              builder: (context, state) => NewHomeScreen(
+                refreshTrigger: state.uri.queryParameters['refresh'],
+              ),
             ),
             GoRoute(
               path: '/habits',
-              builder: (context, state) => const NewHabitsScreen(),
+              // ❌ remove const
+              builder: (context, state) => NewHabitsScreen(),
             ),
-
-            // 🕹 LEGACY SCREENS (backup)
             GoRoute(
               path: '/home-old',
-              builder: (context, state) =>
-                  HomeScreen(refreshTrigger: state.uri.queryParameters['refresh']),
+              builder: (context, state) => HomeScreen(
+                refreshTrigger: state.uri.queryParameters['refresh'],
+              ),
             ),
             GoRoute(
               path: '/habits-old',
               builder: (context, state) => const HabitsScreen(),
             ),
-
-            // 📊 STREAKS / CHAT / SETTINGS
             GoRoute(
               path: '/streaks',
               builder: (context, state) => const StreaksScreen(),
@@ -94,8 +85,6 @@ class DrillSergeantApp extends StatelessWidget {
               path: '/settings',
               builder: (context, state) => const SettingsScreen(),
             ),
-
-            // 📋 DETAIL PAGES
             GoRoute(
               path: '/habits/:id',
               builder: (context, state) => HabitDetailScreen(
@@ -118,10 +107,6 @@ class DrillSergeantApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: buildDarkTheme(),
       routerConfig: router,
-      builder: (context, child) => Directionality(
-        textDirection: TextDirection.ltr,
-        child: child ?? const SizedBox(),
-      ),
     );
   }
 }
