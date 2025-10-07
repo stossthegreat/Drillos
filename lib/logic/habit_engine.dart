@@ -9,6 +9,33 @@ import '../services/local_storage.dart';
 /// - XP awards
 /// - No backend dependency (fire-and-forget logging only)
 class HabitEngine {
+  // Simple in-memory cache of habits for fast UI updates
+  static List<Map<String, dynamic>> habits = [];
+
+  static Future<void> loadHabits() async {
+    habits = await LocalStorage.loadHabits();
+  }
+
+  static Future<void> toggleHabit(String id) async {
+    // Use existing local-first tick logic to ensure prefs (per-day) + streak/XP are updated
+    await applyLocalTick(
+      habitId: id,
+      onApplied: (newStreak, newXp) async {
+        final now = DateTime.now();
+        for (final h in habits) {
+          if (h['id'] == id) {
+            h['completed'] = true; // completed today
+            h['lastCompleted'] = now.toIso8601String();
+            h['streak'] = newStreak;
+            h['xp'] = newXp;
+            h['updatedAt'] = now.toIso8601String();
+            break;
+          }
+        }
+        await LocalStorage.saveHabits(habits);
+      },
+    );
+  }
   static String _ymd(DateTime d) => '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
   /// ⚡ Apply a tick to a habit (INSTANT, OFFLINE-FIRST)

@@ -19,6 +19,17 @@ class LocalStorage {
 
   // ========== HABITS ==========
 
+  // Simple static helpers (requested interface)
+  static Future<void> saveHabits(List<Map<String, dynamic>> habits) async {
+    final storage = LocalStorage();
+    await storage.saveAllHabits(habits);
+  }
+
+  static Future<List<Map<String, dynamic>>> loadHabits() async {
+    final storage = LocalStorage();
+    return await storage.getAllHabits();
+  }
+
   /// Get all habits from local storage
   Future<List<Map<String, dynamic>>> getAllHabits() async {
     await init();
