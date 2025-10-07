@@ -8,21 +8,22 @@ class RootShell extends StatelessWidget {
   int _indexForLocation(String loc) {
     if (loc.startsWith('/habits')) return 1;
     if (loc.startsWith('/streaks')) return 2;
-    if (loc.startsWith('/alarm')) return 3; // ✅ new alarm tab
+    if (loc.startsWith('/alarm')) return 3; // ✅ alarm tab
     if (loc.startsWith('/settings')) return 4;
     return 0; // home
   }
 
   @override
   Widget build(BuildContext context) {
-    final loc = GoRouter.of(context).location;
+    // ✅ compatible with go_router v13.x
+    final loc = GoRouterState.of(context).uri.toString();
     final idx = _indexForLocation(loc);
 
     return Scaffold(
       body: child,
       bottomNavigationBar: NavigationBar(
         selectedIndex: idx,
-        backgroundColor: Colors.black.withOpacity(0.8),
+        backgroundColor: Colors.black.withOpacity(0.85),
         indicatorColor: const Color(0xFF10B981).withOpacity(0.15),
         destinations: const [
           NavigationDestination(
@@ -41,9 +42,9 @@ class RootShell extends StatelessWidget {
             label: 'Streaks',
           ),
           NavigationDestination(
-            icon: Icon(Icons.alarm_outlined), // ✅ replaced Sergeant icon
+            icon: Icon(Icons.alarm_outlined), // ✅ replaces Sergeant
             selectedIcon: Icon(Icons.alarm),
-            label: 'Alarms', // ✅ new label
+            label: 'Alarms',
           ),
           NavigationDestination(
             icon: Icon(Icons.settings_outlined),
@@ -63,7 +64,7 @@ class RootShell extends StatelessWidget {
               context.go('/streaks');
               break;
             case 3:
-              context.go('/alarm'); // ✅ route fixed
+              context.go('/alarm'); // ✅ fixed route
               break;
             case 4:
               context.go('/settings');
