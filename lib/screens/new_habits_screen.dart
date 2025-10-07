@@ -640,19 +640,24 @@ class _NewHabitsScreenState extends State<NewHabitsScreen> with TickerProviderSt
                           border: Border.all(
                             color: isCompleted ? const Color(0xFF10B981) :
                                    isScheduled ? Colors.white.withOpacity(0.2) :
-                                   Colors.white.withOpacity(0.05), // Very faded for non-scheduled days
+                                   Colors.transparent, // ✅ Hide border for non-scheduled days
                             width: 2,
                           ),
                         ),
                         child: Center(
-                          child: Text(
-                            '${date.day}',
-                            style: TextStyle(
-                              color: isCompleted ? Colors.black : 
-                                     isScheduled ? Colors.white :
-                                     Colors.white.withOpacity(0.3), // Gray out non-scheduled days
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
+                          child: isScheduled 
+                            ? Text(
+                                '${date.day}',
+                                style: TextStyle(
+                                  color: isCompleted ? Colors.black : Colors.white,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              )
+                            : Icon(
+                                Icons.remove,
+                                size: 12,
+                                color: Colors.white.withOpacity(0.1), // ✅ Show dash for non-scheduled days
                             ),
                           ),
                         ),
