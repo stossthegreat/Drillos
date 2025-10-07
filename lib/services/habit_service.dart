@@ -47,6 +47,7 @@ class HabitService {
     // Save locally FIRST
     await _storage.saveHabit(habit);
     print('✅ Habit saved locally: ${habit['title']}');
+    print('📋 Saved schedule: ${habit['schedule']}');
 
     // Create alarm if reminder is enabled
     if (habit['reminderEnabled'] == true && habit['reminderTime'] != null) {
@@ -187,10 +188,14 @@ class HabitService {
 
 
     for (final habit in allHabits) {
+      print('🔍 Checking habit: ${habit['title']}, type: ${habit['type']}');
+      print('🔍 Habit schedule: ${habit['schedule']}');
+      
       if (habit['type'] == 'task') {
         // Tasks now use schedule just like habits
         final schedule = habit['schedule'] as Map<String, dynamic>?;
         final isScheduled = schedule == null ? true : _isActiveOn(schedule, today);
+        print('🔍 Task scheduled for today: $isScheduled');
         if (!isScheduled) continue;
 
         // Completion is tracked per-day locally
@@ -207,11 +212,14 @@ class HabitService {
       // Check if habit is scheduled for today
       final schedule = habit['schedule'] as Map<String, dynamic>?;
       if (schedule == null) {
+        print('🔍 Habit has no schedule, adding to today');
         todayHabits.add(habit);
         continue;
       }
 
-      if (_isActiveOn(schedule, today)) {
+      final isActive = _isActiveOn(schedule, today);
+      print('🔍 Habit active today: $isActive');
+      if (isActive) {
         // Load completion status
         final completed = await _storage.isCompletedOn(habit['id'], today);
         final streak = await _storage.getStreak(habit['id']);
