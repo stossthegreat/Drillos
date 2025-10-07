@@ -658,8 +658,7 @@ class _NewHabitsScreenState extends State<NewHabitsScreen> with TickerProviderSt
                                 Icons.remove,
                                 size: 12,
                                 color: Colors.white.withOpacity(0.1), // ✅ Show dash for non-scheduled days
-                            ),
-                          ),
+                              ),
                         ),
                       ),
                     ),
