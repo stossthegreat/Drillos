@@ -1,15 +1,17 @@
+// lib/screens/new_habits_screen.dart
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../services/api_client.dart';
 import '../services/local_storage.dart';
 import '../services/habit_service.dart';
 import '../services/alarm_service.dart';
-import '../services/api_client.dart';
+import '../design/feedback.dart';
+import '../widgets/habit_create_edit_modal.dart';
 import '../logic/habit_engine.dart';
 import '../utils/schedule.dart';
-import '../widgets/habit_create_edit_modal.dart';
-import '../design/feedback.dart';
 
 class NewHabitsScreen extends StatefulWidget {
   const NewHabitsScreen({super.key});
@@ -26,7 +28,7 @@ class _NewHabitsScreenState extends State<NewHabitsScreen>
 
   // UI state
   DateTime selectedDate = DateTime.now();
-  String filterTab = 'habits'; // habits | tasks | bad
+  String currentFilter = 'habits'; // habits | tasks | bad
   bool showCreateModal = false;
   bool showSpeedDial = false;
 
@@ -38,31 +40,32 @@ class _NewHabitsScreenState extends State<NewHabitsScreen>
   late AnimationController _speedDialController;
   late AnimationController _modalController;
 
-  // Colors (keep your design)
+  // Colors for chips / picker
   final List<Map<String, dynamic>> colorOptions = const [
-    {'name': 'emerald', 'color': Color(0xFF10B981), 'bgColor': Color(0xFF10B981)},
-    {'name': 'amber', 'color': Color(0xFFF59E0B), 'bgColor': Color(0xFFF59E0B)},
-    {'name': 'sky', 'color': Color(0xFF0EA5E9), 'bgColor': Color(0xFF0EA5E9)},
-    {'name': 'rose', 'color': Color(0xFFE11D48), 'bgColor': Color(0xFFE11D48)},
-    {'name': 'violet', 'color': Color(0xFF8B5CF6), 'bgColor': Color(0xFF8B5CF6)},
-    {'name': 'slate', 'color': Color(0xFF64748B), 'bgColor': Color(0xFF64748B)},
+    {'name': 'emerald', 'color': Color(0xFF10B981)},
+    {'name': 'amber', 'color': Color(0xFFF59E0B)},
+    {'name': 'sky', 'color': Color(0xFF0EA5E9)},
+    {'name': 'rose', 'color': Color(0xFFE11D48)},
+    {'name': 'violet', 'color': Color(0xFF8B5CF6)},
+    {'name': 'slate', 'color': Color(0xFF64748B)},
   ];
 
-  String _ymd(DateTime d) =>
-      '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+  String formatDate(DateTime d) => d.toIso8601String().split('T')[0];
 
   List<DateTime> get weekDates {
-    final start = selectedDate.subtract(Duration(days: selectedDate.weekday % 7));
-    return List.generate(7, (i) => DateTime(start.year, start.month, start.day + i));
+    final start = selectedDate.subtract(
+      Duration(days: selectedDate.weekday % 7),
+    );
+    return List.generate(7, (i) => start.add(Duration(days: i)));
   }
 
   @override
   void initState() {
     super.initState();
     _speedDialController =
-        AnimationController(vsync: this, duration: const Duration(milliseconds: 200));
+        AnimationController(duration: const Duration(milliseconds: 200), vsync: this);
     _modalController =
-        AnimationController(vsync: this, duration: const Duration(milliseconds: 300));
+        AnimationController(duration: const Duration(milliseconds: 300), vsync: this);
     _resetForm();
     _loadData();
   }
@@ -80,7 +83,7 @@ class _NewHabitsScreenState extends State<NewHabitsScreen>
       'type': 'habit',
       'name': '',
       'category': 'General',
-      'startDate': _ymd(DateTime.now()),
+      'startDate': formatDate(DateTime.now()),
       'endDate': '',
       'frequency': 'daily',
       'everyN': 2,
@@ -88,9 +91,7 @@ class _NewHabitsScreenState extends State<NewHabitsScreen>
       'intensity': 2,
       'reminderOn': false,
       'reminderTime': '08:00',
-      // default mentor selection (used later for voice)
-      'mentorId': 'drill_sergeant',
-      'voicePreset': 'standard',
+      // voice/mentor fields are handled inside HabitCreateEditModal you already pasted
     };
   }
 
@@ -99,151 +100,101 @@ class _NewHabitsScreenState extends State<NewHabitsScreen>
     try {
       await HabitEngine.checkStreakResets();
 
-      // Local-only list (habits & tasks saved locally)
       final storage = localStorage;
-      final items = await storage.getAllHabits();
+      final habits = await storage.getAllHabits();
 
-      final enriched = await Future.wait(items.map((item) async {
-        final id = item['id'].toString();
+      final enriched = await Future.wait(habits.map((item) async {
+        final id = item['id'];
         final type = item['type'] ?? 'habit';
-        final sched = HabitSchedule.fromJson((item['schedule'] as Map?)?.cast<String, dynamic>());
-        final active = sched.isActiveOn(selectedDate);
-        if (!active) return null;
-
-        final completed = await storage.isCompletedOn(id, selectedDate);
         final streak = await storage.getStreak(id);
-        return {
-          ...item,
-          'completed': completed,
-          'streak': type == 'task' ? 0 : streak,
-        };
+        final completed = await storage.isCompletedOn(id, DateTime.now());
+        return {...item, 'streak': streak, 'completed': completed, 'type': type};
       }));
 
+      if (!mounted) return;
       setState(() {
-        allItems = enriched.whereType<Map<String, dynamic>>().toList();
+        allItems = enriched;
         isLoading = false;
       });
-    } catch (e) {
-      setState(() => isLoading = false);
+    } catch (_) {
+      if (mounted) setState(() => isLoading = false);
     }
   }
 
   List<dynamic> get filteredItems {
     return allItems.where((item) {
-      final t = item['type'] ?? 'habit';
-      switch (filterTab) {
+      switch (currentFilter) {
         case 'tasks':
-          return t == 'task';
+          return item['type'] == 'task';
         case 'bad':
-          return t == 'bad' || item['category'] == 'anti-habit';
+          return item['type'] == 'bad';
         default:
-          return t == 'habit' || t == null;
+          return item['type'] == 'habit' || item['type'] == null;
       }
     }).toList();
   }
 
-  Future<void> _toggleCompletion(String id, DateTime date, Map<String, dynamic> item) async {
-    // Only allow completing on **today** (your requirement)
-    final today = DateTime.now();
-    final sameDay = today.year == date.year && today.month == date.month && today.day == date.day;
-    if (!sameDay) {
-      HapticFeedback.lightImpact();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("You can only complete items on today's date.")),
-      );
+  bool _isSameDay(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month && a.day == b.day;
+
+  Future<void> _toggleCompletion(String id, DateTime date) async {
+    // ⛔ only allow completing on *today* (your request)
+    if (!_isSameDay(date, DateTime.now())) {
+      Toast.show(context, '⚠️ You can only complete today’s items.');
       return;
     }
 
-    final isHabit = (item['type'] ?? 'habit') == 'habit';
-
     try {
-      if (isHabit) {
-        // Proper streak handling for today
-        await HabitEngine.applyLocalTick(
-          habitId: id,
-          onApplied: (newStreak, _) {
-            if (!mounted) return;
-            setState(() {
-              final idx = allItems.indexWhere((x) => x['id'].toString() == id);
-              if (idx != -1) {
-                allItems[idx] = {
-                  ...allItems[idx],
-                  'streak': newStreak,
-                  'completed': true,
-                };
-              }
-            });
-          },
-        );
-        apiClient.tickHabit(id, idempotencyKey: '${id}_${_ymd(date)}');
-      } else {
-        // Task or other: mark done for the day
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setBool('done:$id:${_ymd(date)}', true);
-        if (!mounted) return;
-        setState(() {
-          final idx = allItems.indexWhere((x) => x['id'].toString() == id);
-          if (idx != -1) {
-            allItems[idx] = {
-              ...allItems[idx],
-              'completed': true,
-            };
-          }
-        });
-      }
-
+      await HabitEngine.applyLocalTick(
+        habitId: id,
+        onApplied: (newStreak, _) {
+          if (!mounted) return;
+          setState(() {
+            final idx = allItems.indexWhere((x) => x['id'] == id);
+            if (idx != -1) {
+              final current = Map<String, dynamic>.from(allItems[idx]);
+              allItems[idx] = {...current, 'streak': newStreak, 'completed': true};
+            }
+          });
+        },
+      );
+      apiClient.tickHabit(id, idempotencyKey: '${id}_${formatDate(date)}');
       HapticFeedback.selectionClick();
-      // Keep the card visible with a strikethrough (do NOT prune)
-    } catch (_) {
-      // silent
-    }
-  }
-
-  Future<Map<String, bool>> _getWeekCompletionData(
-    String habitId,
-    List<DateTime> dates,
-  ) async {
-    final prefs = await SharedPreferences.getInstance();
-    final out = <String, bool>{};
-    for (final d in dates) {
-      final key = 'done:$habitId:${_ymd(d)}';
-      out[_ymd(d)] = prefs.getBool(key) ?? false;
-    }
-    return out;
+    } catch (_) {}
   }
 
   Future<void> _saveItem(Map<String, dynamic> data) async {
-    if ((data['name'] ?? '').toString().trim().isEmpty) return;
+    if (data['name'].toString().trim().isEmpty) return;
     try {
-      Map<String, dynamic> saved;
-
       if (isEditing && data['id'] != null) {
-        saved = await habitService.updateHabit(data['id'], data);
+        await habitService.updateHabit(data['id'], data);
         Toast.show(context, '✅ Updated');
       } else {
-        saved = (data['type'] == 'task')
+        final created = (data['type'] == 'task')
             ? await habitService.createTask(data)
             : await habitService.createHabit(data);
-        Toast.show(context, '✅ Created');
-      }
 
-      // Schedule reminder if enabled
-      if ((saved['reminderEnabled'] == true) && (saved['reminderTime'] is String)) {
-        final schedule = (saved['schedule'] as Map?)?.cast<String, dynamic>();
-        final days = (schedule?['daysOfWeek'] as List?)
-                ?.map((e) => (e is int) ? e : (e is String ? int.tryParse(e) : (e is num ? e.toInt() : null)))
-                .whereType<int>()
-                .toList() ??
-            [1, 2, 3, 4, 5, 6, 7];
+        // Schedule alarm if enabled
+        if ((created['reminderEnabled'] == true) &&
+            (created['reminderTime'] is String)) {
+          final schedule = (created['schedule'] as Map?)?.cast<String, dynamic>();
+          final days = (schedule?['daysOfWeek'] as List?)?.map((e) {
+                if (e is int) return e;
+                if (e is String) return int.tryParse(e);
+                if (e is num) return e.toInt();
+                return null;
+              }).whereType<int>().toList() ??
+              [1, 2, 3, 4, 5, 6, 7];
 
-        await alarmService.requestPermissions();
-        await alarmService.scheduleAlarm(
-          habitId: saved['id'].toString(),
-          habitName: saved['title'] ?? saved['name'] ?? 'Habit',
-          time: saved['reminderTime'] as String,
-          daysOfWeek: days,
-          mentorMessage: '⚡ Time to complete: ${saved['title'] ?? saved['name']}',
-        );
+          await alarmService.scheduleAlarm(
+            habitId: created['id'].toString(),
+            habitName: created['title'] ?? created['name'] ?? 'Habit',
+            time: created['reminderTime'] as String,
+            daysOfWeek: days,
+            mentorMessage:
+                '⚡ Time to complete: ${created['title'] ?? created['name']}',
+          );
+        }
       }
 
       _closeModal();
@@ -256,8 +207,15 @@ class _NewHabitsScreenState extends State<NewHabitsScreen>
 
   Future<void> _deleteItem(String id) async {
     try {
+      // remove from storage & cancel notifications
       await habitService.deleteHabit(id);
-      await alarmService.cancelAlarm(id); // clean up notifications too
+      await alarmService.cancelAlarm(id);
+
+      // local state refresh (belt + braces)
+      final items = await localStorage.getAllHabits();
+      items.removeWhere((x) => x['id'] == id);
+      await localStorage.saveAllHabits(items);
+
       await _loadData();
       HapticFeedback.heavyImpact();
       if (!mounted) return;
@@ -265,10 +223,7 @@ class _NewHabitsScreenState extends State<NewHabitsScreen>
         const SnackBar(content: Text('✅ Deleted'), duration: Duration(seconds: 1)),
       );
     } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to delete: $e')),
-      );
+      Toast.show(context, 'Failed to delete: $e');
     }
   }
 
@@ -290,7 +245,7 @@ class _NewHabitsScreenState extends State<NewHabitsScreen>
         'type': item['type'] ?? 'habit',
         'name': item['name'] ?? item['title'] ?? '',
         'category': item['category'] ?? 'General',
-        'startDate': item['startDate'] ?? _ymd(DateTime.now()),
+        'startDate': item['startDate'] ?? formatDate(DateTime.now()),
         'endDate': item['endDate'] ?? '',
         'frequency': item['frequency'] ?? 'daily',
         'everyN': item['everyN'] ?? 2,
@@ -298,8 +253,6 @@ class _NewHabitsScreenState extends State<NewHabitsScreen>
         'intensity': item['difficulty'] ?? item['intensity'] ?? 2,
         'reminderOn': item['reminderEnabled'] ?? false,
         'reminderTime': item['reminderTime'] ?? '08:00',
-        'mentorId': item['mentorId'] ?? 'drill_sergeant',
-        'voicePreset': item['voicePreset'] ?? 'standard',
       };
       isEditing = true;
       showCreateModal = true;
@@ -324,32 +277,75 @@ class _NewHabitsScreenState extends State<NewHabitsScreen>
     )['color'] as Color;
   }
 
-  // ================= UI =================
+  // ---------------- UI ----------------
 
-  Widget _topBar() {
+  @override
+  Widget build(BuildContext context) {
+    if (isLoading) {
+      return const Scaffold(
+        backgroundColor: Color(0xFF0B0F0E),
+        body: Center(
+          child: CircularProgressIndicator(color: Color(0xFF10B981)),
+        ),
+      );
+    }
+
+    return Scaffold(
+      backgroundColor: const Color(0xFF0B0F0E),
+      body: Stack(
+        children: [
+          CustomScrollView(
+            slivers: [
+              SliverToBoxAdapter(child: _buildTopBar()),
+              SliverToBoxAdapter(child: _buildWeekStrip()),
+              const SliverToBoxAdapter(child: SizedBox(height: 24)),
+              SliverList(
+                delegate: SliverChildBuilderDelegate(
+                  (context, index) => _buildItemCard(filteredItems[index]),
+                  childCount: filteredItems.length,
+                ),
+              ),
+              const SliverToBoxAdapter(child: SizedBox(height: 120)),
+            ],
+          ),
+          _buildSpeedDial(),
+          if (showCreateModal)
+            HabitCreateEditModal(
+              formData: formData,
+              isEditing: isEditing,
+              colorOptions: colorOptions,
+              onSave: _saveItem,
+              onCancel: _closeModal,
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTopBar() {
     return Container(
       padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
       child: Row(
         children: [
           const Text(
             'Daily Orders',
-            style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+            ),
           ),
           const Spacer(),
           TextButton(
             onPressed: () async {
-              await alarmService.requestPermissions();
               await alarmService.scheduleAlarm(
                 habitId: '__test_alarm__',
                 habitName: 'Test Alarm',
                 time: '08:00',
-                daysOfWeek: const [1, 2, 3, 4, 5, 6, 7],
+                daysOfWeek: [DateTime.now().weekday],
                 mentorMessage: '🔔 This is your DrillOS test alarm.',
               );
-              if (!mounted) return;
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Test alarm scheduled')),
-              );
+              Toast.show(context, 'Test alarm scheduled for 08:00');
             },
             child: const Text('Test Alarm', style: TextStyle(color: Colors.white70)),
           ),
@@ -369,17 +365,15 @@ class _NewHabitsScreenState extends State<NewHabitsScreen>
     );
   }
 
-  Widget _weekStrip() {
+  Widget _buildWeekStrip() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Column(
         children: [
           Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
             IconButton(
-              onPressed: () async {
-                setState(() => selectedDate = selectedDate.subtract(const Duration(days: 7)));
-                await _loadData();
-              },
+              onPressed: () =>
+                  setState(() => selectedDate = selectedDate.subtract(const Duration(days: 7))),
               icon: const Icon(Icons.chevron_left, color: Colors.white70),
             ),
             Text(
@@ -387,24 +381,17 @@ class _NewHabitsScreenState extends State<NewHabitsScreen>
               style: const TextStyle(color: Colors.white70, fontSize: 16),
             ),
             IconButton(
-              onPressed: () async {
-                setState(() => selectedDate = selectedDate.add(const Duration(days: 7)));
-                await _loadData();
-              },
+              onPressed: () =>
+                  setState(() => selectedDate = selectedDate.add(const Duration(days: 7))),
               icon: const Icon(Icons.chevron_right, color: Colors.white70),
             ),
           ]),
           Row(
             children: weekDates.map((date) {
-              final selected = _ymd(date) == _ymd(selectedDate);
+              final selected = formatDate(date) == formatDate(selectedDate);
               return Expanded(
                 child: GestureDetector(
-                  onTap: () async {
-                    if (_ymd(date) != _ymd(selectedDate)) {
-                      setState(() => selectedDate = date);
-                      await _loadData();
-                    }
-                  },
+                  onTap: () => setState(() => selectedDate = date),
                   child: Container(
                     margin: const EdgeInsets.symmetric(horizontal: 2),
                     padding: const EdgeInsets.symmetric(vertical: 8),
@@ -412,7 +399,9 @@ class _NewHabitsScreenState extends State<NewHabitsScreen>
                       color: selected ? const Color(0xFF10B981) : const Color(0xFF121816),
                       borderRadius: BorderRadius.circular(16),
                       border: Border.all(
-                        color: selected ? const Color(0xFF34D399) : Colors.white.withOpacity(0.1),
+                        color: selected
+                            ? const Color(0xFF34D399)
+                            : Colors.white.withOpacity(0.1),
                       ),
                     ),
                     child: Column(
@@ -443,11 +432,11 @@ class _NewHabitsScreenState extends State<NewHabitsScreen>
           const SizedBox(height: 16),
           Row(
             children: [
-              _buildFilterTab('habits', 'Habits'),
+              _filterTab('habits', 'Habits'),
               const SizedBox(width: 8),
-              _buildFilterTab('tasks', 'Tasks'),
+              _filterTab('tasks', 'Tasks'),
               const SizedBox(width: 8),
-              _buildFilterTab('bad', 'Bad Habits'),
+              _filterTab('bad', 'Bad Habits'),
             ],
           ),
         ],
@@ -455,11 +444,11 @@ class _NewHabitsScreenState extends State<NewHabitsScreen>
     );
   }
 
-  Widget _buildFilterTab(String key, String label) {
-    final selected = filterTab == key;
+  Widget _filterTab(String key, String label) {
+    final selected = currentFilter == key;
     return Expanded(
       child: GestureDetector(
-        onTap: () => setState(() => filterTab = key),
+        onTap: () => setState(() => currentFilter = key),
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 12),
           decoration: BoxDecoration(
@@ -483,13 +472,17 @@ class _NewHabitsScreenState extends State<NewHabitsScreen>
     );
   }
 
-  Widget _itemCard(Map<String, dynamic> item) {
-    final itemColor = _colorFor(item);
-    final itemType = item['type'] ?? 'habit';
+  String _monthName(int m) =>
+      ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m];
+
+  String _dayAbbr(int weekday) =>
+      ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][weekday - 1];
+
+  Widget _buildItemCard(dynamic item) {
+    final color = _colorFor(item);
+    final type = item['type'] ?? 'habit';
+    final streak = item['streak'] ?? 0;
     final completed = item['completed'] == true;
-    final streak = (item['streak'] ?? 0) as int;
-    final intensity = item['difficulty'] ?? item['intensity'] ?? 1;
-    final title = item['name'] ?? item['title'] ?? 'Untitled';
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -502,190 +495,116 @@ class _NewHabitsScreenState extends State<NewHabitsScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // header
           Row(children: [
             Container(
               width: 40,
               height: 40,
-              decoration: BoxDecoration(color: itemColor, borderRadius: BorderRadius.circular(8)),
+              decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(8)),
               child: Icon(
-                itemType == 'habit'
+                type == 'habit'
                     ? Icons.local_fire_department
-                    : itemType == 'task'
+                    : type == 'task'
                         ? Icons.check_box
                         : Icons.close,
                 color: Colors.black,
-                size: 20,
               ),
             ),
             const SizedBox(width: 12),
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.w600,
-                      decoration: completed ? TextDecoration.lineThrough : null,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    '${item['category'] ?? 'General'} • Intensity $intensity',
-                    style: const TextStyle(color: Colors.white60, fontSize: 12),
-                  ),
-                ],
+              child: Text(
+                item['name'] ?? item['title'] ?? 'Untitled',
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                  decoration: completed ? TextDecoration.lineThrough : null,
+                ),
               ),
             ),
-            if (item['reminderEnabled'] == true) ...[
+            if (item['reminderEnabled'] == true)
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration:
-                    BoxDecoration(color: Colors.white.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
-                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  const Icon(Icons.notifications, color: Color(0xFF10B981), size: 12),
-                  const SizedBox(width: 4),
-                  Text(item['reminderTime'] ?? '08:00',
-                      style: const TextStyle(color: Color(0xFF10B981), fontSize: 12)),
-                ]),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.notifications, size: 14, color: Color(0xFF10B981)),
+                    const SizedBox(width: 4),
+                    Text(
+                      item['reminderTime'] ?? '08:00',
+                      style: const TextStyle(color: Color(0xFF10B981), fontSize: 12),
+                    ),
+                  ],
+                ),
               ),
-              const SizedBox(width: 8),
-            ],
             IconButton(
               onPressed: () => _openEditModal(item),
-              icon: Container(
-                padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(color: Colors.white.withOpacity(0.1), borderRadius: BorderRadius.circular(6)),
-                child: const Icon(Icons.settings, color: Colors.white, size: 16),
-              ),
+              icon: const Icon(Icons.settings, color: Colors.white, size: 20),
             ),
           ]),
-
           const SizedBox(height: 12),
 
-          // week rail (tap only toggles if scheduled AND is today)
-          FutureBuilder<Map<String, bool>>(
-            future: _getWeekCompletionData(item['id'].toString(), weekDates),
-            builder: (context, snapshot) {
-              final completionData = snapshot.data ?? {};
-              final sched = HabitSchedule.fromJson((item['schedule'] as Map?)?.cast<String, dynamic>());
-
-              return Row(
-                children: weekDates.map((date) {
-                  final dateKey = _ymd(date);
-                  final isCompleted = completionData[dateKey] ?? false;
-                  final isScheduled = sched.isActiveOn(date);
-                  final isToday = _ymd(date) == _ymd(DateTime.now());
-
-                  return Expanded(
-                    child: GestureDetector(
-                      onTap: (isScheduled && isToday)
-                          ? () => _toggleCompletion(item['id'].toString(), date, item)
-                          : null,
-                      child: Container(
-                        margin: const EdgeInsets.symmetric(horizontal: 2),
-                        height: 40,
-                        decoration: BoxDecoration(
-                          color: isCompleted
-                              ? const Color(0xFF10B981)
-                              : completed && _ymd(date) == _ymd(selectedDate)
-                                  ? const Color(0xFF10B981)
-                                  : Colors.transparent,
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(
-                            color: isCompleted
-                                ? const Color(0xFF10B981)
-                                : isScheduled
-                                    ? Colors.white.withOpacity(0.2)
-                                    : Colors.transparent,
-                            width: 2,
-                          ),
-                        ),
-                        child: Center(
-                          child: isScheduled
-                              ? Text(
-                                  '${date.day}',
-                                  style: TextStyle(
-                                    color: (isCompleted ||
-                                            (completed && _ymd(date) == _ymd(selectedDate)))
-                                        ? Colors.black
-                                        : Colors.white,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
-                                    decoration: (completed && _ymd(date) == _ymd(selectedDate))
-                                        ? TextDecoration.lineThrough
-                                        : null,
-                                  ),
-                                )
-                              : Icon(Icons.remove, size: 12, color: Colors.white.withOpacity(0.1)),
-                        ),
-                      ),
+          Row(
+            children: [
+              GestureDetector(
+                onTap: () => _toggleCompletion(item['id'], selectedDate),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: completed ? Colors.green : color.withOpacity(0.3),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    completed ? 'Done' : 'Complete',
+                    style: const TextStyle(color: Colors.white),
+                  ),
+                ),
+              ),
+              const Spacer(),
+              GestureDetector(
+                onTap: () => _deleteItem(item['id']),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.red.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Text(
+                    'Delete',
+                    style: TextStyle(
+                      color: Colors.redAccent,
+                      fontWeight: FontWeight.w600,
                     ),
-                  );
-                }).toList(),
-              );
-            },
+                  ),
+                ),
+              ),
+            ],
           ),
 
-          if (itemType != 'task') ...[
+          if (type != 'task') ...[
             const SizedBox(height: 8),
             Row(
               children: [
                 const Icon(Icons.local_fire_department, color: Color(0xFFF59E0B), size: 16),
-                const SizedBox(width: 4),
+                const SizedBox(width: 6),
                 Text(
-                  '${streak}d',
+                  '${streak}d streak',
                   style: const TextStyle(color: Colors.white70, fontSize: 14),
                 ),
               ],
             ),
           ],
-
-          const SizedBox(height: 12),
-
-          // actions
-          Row(
-            children: [
-              _actionButton('Calendar', Icons.calendar_today, () => _openEditModal(item)),
-              const SizedBox(width: 8),
-              _actionButton('Stats', Icons.bar_chart, () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Stats coming soon!')),
-                );
-              }),
-              const Spacer(),
-              _actionButton('Delete', Icons.delete, () => _deleteItem(item['id'].toString()),
-                  color: const Color(0xFFE11D48)),
-            ],
-          ),
         ],
       ),
     );
   }
 
-  Widget _actionButton(String label, IconData icon, VoidCallback onTap, {Color? color}) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-        decoration: BoxDecoration(
-          color: (color ?? Colors.white).withOpacity(0.1),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(icon, color: color ?? Colors.white70, size: 16),
-          const SizedBox(width: 4),
-          Text(label, style: TextStyle(color: color ?? Colors.white70, fontSize: 12)),
-        ]),
-      ),
-    );
-  }
-
-  Widget _speedDial() {
+  // Floating add buttons (unchanged look)
+  Widget _buildSpeedDial() {
     return Positioned(
       right: 20,
       bottom: 100,
@@ -693,8 +612,8 @@ class _NewHabitsScreenState extends State<NewHabitsScreen>
         mainAxisSize: MainAxisSize.min,
         children: [
           if (showSpeedDial) ...[
-            _speedItem('Add Habit', Icons.local_fire_department, const Color(0xFF10B981),
-                () => _openCreateModal('habit')),
+            _speedItem('Add Habit', Icons.local_fire_department,
+                const Color(0xFF10B981), () => _openCreateModal('habit')),
             const SizedBox(height: 12),
             _speedItem('Add Task', Icons.check_box, const Color(0xFF0EA5E9),
                 () => _openCreateModal('task')),
@@ -705,10 +624,7 @@ class _NewHabitsScreenState extends State<NewHabitsScreen>
           ],
           GestureDetector(
             onTap: () {
-              setState(() {
-                showCreateModal = false;
-                showSpeedDial = !showSpeedDial;
-              });
+              setState(() => showSpeedDial = !showSpeedDial);
               if (showSpeedDial) {
                 _speedDialController.forward();
               } else {
@@ -721,9 +637,19 @@ class _NewHabitsScreenState extends State<NewHabitsScreen>
               decoration: const BoxDecoration(
                 color: Color(0xFF10B981),
                 shape: BoxShape.circle,
-                boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 8, offset: Offset(0, 4))],
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black26,
+                    blurRadius: 8,
+                    offset: Offset(0, 4),
+                  ),
+                ],
               ),
-              child: Icon(showSpeedDial ? Icons.close : Icons.add, color: Colors.black, size: 24),
+              child: Icon(
+                showSpeedDial ? Icons.close : Icons.add,
+                color: Colors.black,
+                size: 24,
+              ),
             ),
           ),
         ],
@@ -731,7 +657,12 @@ class _NewHabitsScreenState extends State<NewHabitsScreen>
     );
   }
 
-  Widget _speedItem(String label, IconData icon, Color color, VoidCallback onTap) {
+  Widget _speedItem(
+    String label,
+    IconData icon,
+    Color color,
+    VoidCallback onTap,
+  ) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -739,60 +670,29 @@ class _NewHabitsScreenState extends State<NewHabitsScreen>
         decoration: BoxDecoration(
           color: color,
           borderRadius: BorderRadius.circular(12),
-          boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4, offset: Offset(0, 2))],
-        ),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(icon, color: Colors.black, size: 16),
-          const SizedBox(width: 8),
-          Text(label, style: const TextStyle(color: Colors.black, fontSize: 14, fontWeight: FontWeight.w600)),
-        ]),
-      ),
-    );
-  }
-
-  String _monthName(int m) =>
-      const ['', 'January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'][m];
-
-  String _dayAbbr(int weekday) => const ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][weekday];
-
-  @override
-  Widget build(BuildContext context) {
-    if (isLoading) {
-      return const Scaffold(
-        backgroundColor: Color(0xFF0B0F0E),
-        body: Center(child: CircularProgressIndicator(color: Color(0xFF10B981))),
-      );
-    }
-
-    return Scaffold(
-      backgroundColor: const Color(0xFF0B0F0E),
-      body: Stack(
-        children: [
-          CustomScrollView(
-            slivers: [
-              SliverToBoxAdapter(child: _topBar()),
-              SliverToBoxAdapter(child: _weekStrip()),
-              const SliverToBoxAdapter(child: SizedBox(height: 24)),
-              SliverList(
-                delegate: SliverChildBuilderDelegate(
-                  (context, index) => _itemCard(filteredItems[index] as Map<String, dynamic>),
-                  childCount: filteredItems.length,
-                ),
-              ),
-              const SliverToBoxAdapter(child: SizedBox(height: 120)),
-            ],
-          ),
-          _speedDial(),
-
-          if (showCreateModal)
-            HabitCreateEditModal(
-              formData: formData,
-              isEditing: isEditing,
-              colorOptions: colorOptions,
-              onSave: _saveItem,
-              onCancel: _closeModal,
+          boxShadow: const [
+            BoxShadow(
+              color: Colors.black26,
+              blurRadius: 4,
+              offset: Offset(0, 2),
             ),
-        ],
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: Colors.black, size: 16),
+            const SizedBox(width: 8),
+            Text(
+              label,
+              style: const TextStyle(
+                color: Colors.black,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
