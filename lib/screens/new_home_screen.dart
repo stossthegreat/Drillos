@@ -1,13 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
 import '../services/local_storage.dart';
 import '../services/habit_service.dart';
 import '../services/api_client.dart';
 import '../logic/habit_engine.dart';
 import '../utils/schedule.dart';
-import '../widgets/xp_hud.dart';
 import '../design/feedback.dart';
 
 class NewHomeScreen extends StatefulWidget {
@@ -20,17 +18,17 @@ class NewHomeScreen extends StatefulWidget {
 
 class _NewHomeScreenState extends State<NewHomeScreen>
     with TickerProviderStateMixin {
-  // Data
   bool isLoading = true;
   DateTime selectedDate = _startOfDay(DateTime.now());
-  List<Map<String, dynamic>> itemsForDay = [];
-  Map<String, dynamic> briefData = {};
-  Map<String, dynamic>? currentNudge;
+  List<Map<String, dynamic>> habits = [];
+  List<Map<String, dynamic>> tasks = [];
 
-  // Anim
+  final _local = localStorage;
+  final _habits = habitService;
+  final _api = apiClient;
+
   late AnimationController _progressController;
 
-  // Colors
   final List<Map<String, dynamic>> colorOptions = const [
     {'name': 'emerald', 'color': Color(0xFF10B981), 'neon': Color(0xFF34D399)},
     {'name': 'amber', 'color': Color(0xFFF59E0B), 'neon': Color(0xFFFBBF24)},
@@ -40,16 +38,11 @@ class _NewHomeScreenState extends State<NewHomeScreen>
     {'name': 'slate', 'color': Color(0xFF64748B), 'neon': Color(0xFF94A3B8)},
   ];
 
-  // Services
-  final _local = localStorage;
-  final _habits = habitService;
-  final _api = apiClient;
-
   @override
   void initState() {
     super.initState();
-    _progressController =
-        AnimationController(vsync: this, duration: const Duration(milliseconds: 800));
+    _progressController = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 800));
     _loadAll(selectedDate);
   }
 
@@ -71,21 +64,18 @@ class _NewHomeScreenState extends State<NewHomeScreen>
 
   Future<void> _loadAll(DateTime day) async {
     setState(() => isLoading = true);
-
     try {
-      // Streak resets for "today" only
       if (_isSameDay(day, DateTime.now())) {
         await HabitEngine.checkStreakResets();
       }
 
-      // 1) Build the list for the selected day from local storage only
       final all = await _local.getAllHabits();
-      final List<Map<String, dynamic>> filtered = [];
+      final List<Map<String, dynamic>> todayHabits = [];
+      final List<Map<String, dynamic>> todayTasks = [];
+
       for (final raw in all) {
         final item = Map<String, dynamic>.from(raw);
         final type = item['type'] ?? 'habit';
-
-        // Keep tasks too if you store them locally (same schedule rules)
         final sched = HabitSchedule.fromJson(
           (item['schedule'] as Map?)?.cast<String, dynamic>(),
         );
@@ -93,40 +83,34 @@ class _NewHomeScreenState extends State<NewHomeScreen>
         final active = sched.isActiveOn(day);
         if (!active) continue;
 
-        final completed = await _local.isCompletedOn(item['id'].toString(), day);
+        final completed =
+            await _local.isCompletedOn(item['id'].toString(), day);
         final streak = await _local.getStreak(item['id'].toString());
 
-        filtered.add({
+        final data = {
           ...item,
           'completed': completed,
           'streak': streak,
           'type': type,
-        });
-      }
+        };
 
-      // 2) Optional: pull brief + nudge (non-blocking if they fail)
-      Map<String, dynamic> brief = {};
-      Map<String, dynamic>? nudge;
-      try {
-        brief = await _api.getBrief();
-      } catch (_) {}
-      try {
-        nudge = await _api.getNudge();
-      } catch (_) {}
+        if (type == 'task') {
+          todayTasks.add(data);
+        } else {
+          todayHabits.add(data);
+        }
+      }
 
       if (!mounted) return;
       setState(() {
-        itemsForDay = filtered;
-        briefData = brief;
-        currentNudge = nudge;
+        habits = todayHabits;
+        tasks = todayTasks;
         isLoading = false;
       });
-
       _progressController.forward();
-    } catch (e) {
+    } catch (_) {
       if (!mounted) return;
       setState(() => isLoading = false);
-      // keep going quietly
     }
   }
 
@@ -135,22 +119,21 @@ class _NewHomeScreenState extends State<NewHomeScreen>
   Future<void> _toggleItem(Map<String, dynamic> item) async {
     final id = item['id'].toString();
     final isHabit = (item['type'] ?? 'habit') == 'habit';
-
-    // If the user is viewing today, use HabitEngine so streak/XP update correctly.
     final viewingToday = _isSameDay(selectedDate, DateTime.now());
 
+    if (!viewingToday) return; // ❌ Can't complete future/past days manually
+
     try {
-      if (isHabit && viewingToday) {
-        // Use HabitEngine for proper streak logic on "today"
+      if (isHabit) {
         await HabitEngine.applyLocalTick(
           habitId: id,
           onApplied: (newStreak, newXp) {
             if (!mounted) return;
             setState(() {
-              final idx = itemsForDay.indexWhere((x) => x['id'].toString() == id);
+              final idx = habits.indexWhere((x) => x['id'] == id);
               if (idx != -1) {
-                itemsForDay[idx] = {
-                  ...itemsForDay[idx],
+                habits[idx] = {
+                  ...habits[idx],
                   'completed': true,
                   'streak': newStreak,
                 };
@@ -158,51 +141,30 @@ class _NewHomeScreenState extends State<NewHomeScreen>
             });
           },
         );
-        // Fire-and-forget backend analytics
         _api.tickHabit(id, idempotencyKey: '${id}_${_ymd(selectedDate)}');
       } else {
-        // For past/future dates (or tasks): toggle the per-day completion flag only.
-        final prefs = await SharedPreferences.getInstance();
-        final key = 'done:$id:${_ymd(selectedDate)}';
-        final was = prefs.getBool(key) ?? false;
-        final now = !was;
-
-        if (now) {
-          await prefs.setBool(key, true);
-          await _local.setLastCompletionDate(id, selectedDate);
-        } else {
-          await prefs.remove(key);
-        }
-
-        if (!mounted) return;
+        await _local.markCompleted(id, selectedDate);
         setState(() {
-          final idx = itemsForDay.indexWhere((x) => x['id'].toString() == id);
+          final idx = tasks.indexWhere((x) => x['id'] == id);
           if (idx != -1) {
-            itemsForDay[idx] = {
-              ...itemsForDay[idx],
-              'completed': now,
-            };
+            tasks[idx] = {...tasks[idx], 'completed': true};
           }
         });
       }
 
       HapticFeedback.selectionClick();
-
-      // If the item just became completed for that day, hide it from the list
-      // (people want to preview forward days with only scheduled, not already-done items)
-      _pruneCompletedForSelectedDay();
-    } catch (e) {
-      // keep quiet
-    }
+    } catch (_) {}
   }
 
-  void _pruneCompletedForSelectedDay() {
-    setState(() {
-      itemsForDay = itemsForDay.where((it) => it['completed'] != true).toList();
-    });
+  Future<void> _deleteItem(String id) async {
+    try {
+      await _habits.deleteHabit(id);
+      await _loadAll(selectedDate);
+      HapticFeedback.heavyImpact();
+    } catch (_) {}
   }
 
-  // ========================= UI HELPERS =========================
+  // ========================= HELPERS =========================
 
   static DateTime _startOfDay(DateTime d) => DateTime(d.year, d.month, d.day);
 
@@ -231,16 +193,28 @@ class _NewHomeScreenState extends State<NewHomeScreen>
   List<DateTime> get _weekDates {
     final start = selectedDate.subtract(Duration(days: selectedDate.weekday % 7));
     return List.generate(7, (i) => _startOfDay(start.add(Duration(days: i))));
-    }
+  }
 
-  String _monthName(int m) =>
-      const ['', 'January', 'February', 'March', 'April', 'May', 'June', 'July',
-        'August', 'September', 'October', 'November', 'December'][m];
+  String _monthName(int m) => const [
+        '',
+        'January',
+        'February',
+        'March',
+        'April',
+        'May',
+        'June',
+        'July',
+        'August',
+        'September',
+        'October',
+        'November',
+        'December'
+      ][m];
 
   String _dayAbbr(int w) =>
       const ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][w];
 
-  // ========================= WIDGETS =========================
+  // ========================= UI =========================
 
   Widget _weekStrip() {
     return Container(
@@ -293,7 +267,9 @@ class _NewHomeScreenState extends State<NewHomeScreen>
                       color: isSel ? const Color(0xFF10B981) : const Color(0xFF121816),
                       borderRadius: BorderRadius.circular(16),
                       border: Border.all(
-                        color: isSel ? const Color(0xFF34D399) : Colors.white.withOpacity(0.1),
+                        color: isSel
+                            ? const Color(0xFF34D399)
+                            : Colors.white.withOpacity(0.1),
                       ),
                     ),
                     child: Column(
@@ -326,53 +302,25 @@ class _NewHomeScreenState extends State<NewHomeScreen>
     );
   }
 
-  Widget _xpHud() {
-    final stats = briefData['stats'] ?? {};
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: XpHud(
-        totalXP: (stats['totalXP'] ?? 0) as int,
-        longestStreak: (stats['longestStreak'] ?? 0) as int,
-        completedToday: (stats['completedToday'] ?? 0) as int,
-        totalHabits: (stats['totalHabits'] ?? 0) as int,
-      ),
-    );
-  }
-
-  Widget _itemsList() {
-    if (itemsForDay.isEmpty) {
-      return Container(
-        margin: const EdgeInsets.symmetric(horizontal: 16),
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: const Color(0xFF121816),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.white.withOpacity(0.1)),
-        ),
-        child: const Center(
-          child: Text(
-            'No missions scheduled for this day.',
-            style: TextStyle(color: Colors.white70, fontSize: 16),
-            textAlign: TextAlign.center,
+  Widget _sectionTitle(String title) => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 24, 20, 8),
+        child: Text(
+          title,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 18,
+            fontWeight: FontWeight.w800,
           ),
         ),
       );
-    }
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Column(
-        children: itemsForDay.map((it) => _itemCard(it)).toList(),
-      ),
-    );
-  }
-
-  Widget _itemCard(Map<String, dynamic> item) {
+  Widget _itemCard(Map<String, dynamic> item, bool isToday) {
     final itemColor = _colorOf(item);
     final neon = _neonOf(item);
     final completed = item['completed'] == true;
     final streak = (item['streak'] ?? 0) as int;
     final title = item['name'] ?? item['title'] ?? 'Habit';
+    final type = item['type'] ?? 'habit';
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -388,7 +336,6 @@ class _NewHomeScreenState extends State<NewHomeScreen>
       ),
       child: Row(
         children: [
-          // Icon
           Container(
             width: 40,
             height: 40,
@@ -396,11 +343,16 @@ class _NewHomeScreenState extends State<NewHomeScreen>
               color: completed ? neon : itemColor,
               borderRadius: BorderRadius.circular(8),
             ),
-            child: Icon(completed ? Icons.check : Icons.local_fire_department, color: Colors.black),
+            child: Icon(
+              completed
+                  ? Icons.check
+                  : type == 'task'
+                      ? Icons.check_box
+                      : Icons.local_fire_department,
+              color: Colors.black,
+            ),
           ),
           const SizedBox(width: 12),
-
-          // Texts
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -415,43 +367,54 @@ class _NewHomeScreenState extends State<NewHomeScreen>
                     decoration: completed ? TextDecoration.lineThrough : null,
                   ),
                 ),
-                const SizedBox(height: 4),
-                Row(
-                  children: [
-                    Icon(Icons.local_fire_department, color: neon, size: 14),
-                    const SizedBox(width: 4),
-                    Text('$streak day streak',
-                        style: TextStyle(color: neon.withOpacity(0.85), fontSize: 12)),
-                  ],
-                ),
+                if (type == 'habit')
+                  Row(
+                    children: [
+                      Icon(Icons.local_fire_department, color: neon, size: 14),
+                      const SizedBox(width: 4),
+                      Text('$streak day streak',
+                          style: TextStyle(color: neon.withOpacity(0.85), fontSize: 12)),
+                    ],
+                  ),
               ],
             ),
           ),
-
-          // Button
           GestureDetector(
-            onTap: () async {
-              await _toggleItem(item);
-              // After toggling, if completed, it will be pruned from the list
-              // so users can flip through days and only see what's left to do.
-            },
+            onTap: isToday && !completed ? () => _toggleItem(item) : null,
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(
-                color: completed ? neon : itemColor.withOpacity(0.35),
+                color: completed
+                    ? neon
+                    : isToday
+                        ? itemColor.withOpacity(0.35)
+                        : Colors.white12,
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(color: neon.withOpacity(0.8)),
               ),
               child: Text(
-                completed ? 'Done' : 'Complete',
+                completed
+                    ? 'Done'
+                    : isToday
+                        ? 'Complete'
+                        : 'Locked',
                 style: TextStyle(
-                  color: completed ? Colors.black : Colors.white,
+                  color: completed
+                      ? Colors.black
+                      : isToday
+                          ? Colors.white
+                          : Colors.white38,
                   fontSize: 12,
                   fontWeight: FontWeight.w700,
                 ),
               ),
             ),
           ),
+          const SizedBox(width: 8),
+          GestureDetector(
+            onTap: () => _deleteItem(item['id'].toString()),
+            child: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 20),
+          )
         ],
       ),
     );
@@ -468,6 +431,8 @@ class _NewHomeScreenState extends State<NewHomeScreen>
       );
     }
 
+    final isToday = _isSameDay(selectedDate, DateTime.now());
+
     return Scaffold(
       backgroundColor: const Color(0xFF0B0F0E),
       body: RefreshIndicator(
@@ -478,32 +443,19 @@ class _NewHomeScreenState extends State<NewHomeScreen>
               backgroundColor: const Color(0xFF0B0F0E),
               elevation: 0,
               floating: true,
-              title: Row(
-                children: [
-                  const Icon(Icons.auto_awesome, color: Color(0xFF10B981), size: 24),
-                  const SizedBox(width: 8),
-                  ShaderMask(
-                    shaderCallback: (b) => const LinearGradient(
-                      colors: [Color(0xFF10B981), Color(0xFFF59E0B)],
-                    ).createShader(b),
-                    child: const Text(
-                      'Daily Orders',
-                      style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900, color: Colors.white),
-                    ),
-                  ),
-                ],
+              title: ShaderMask(
+                shaderCallback: (b) => const LinearGradient(
+                  colors: [Color(0xFF10B981), Color(0xFFF59E0B)],
+                ).createShader(b),
+                child: const Text(
+                  'Daily Orders',
+                  style: TextStyle(fontSize: 26, fontWeight: FontWeight.w900, color: Colors.white),
+                ),
               ),
               actions: [
                 IconButton(
-                  onPressed: () => Toast.show(context, 'Settings coming soon'),
-                  icon: Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Icon(Icons.settings, color: Colors.white, size: 20),
-                  ),
+                  onPressed: () => _loadAll(selectedDate),
+                  icon: const Icon(Icons.refresh, color: Colors.white70),
                 ),
                 const SizedBox(width: 8),
               ],
@@ -511,18 +463,12 @@ class _NewHomeScreenState extends State<NewHomeScreen>
             SliverList(
               delegate: SliverChildListDelegate([
                 _weekStrip(),
-                const SizedBox(height: 16),
-                _xpHud(),
-                const SizedBox(height: 16),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Text(
-                    'Missions for ${_ymd(selectedDate)}',
-                    style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700),
-                  ),
-                ),
                 const SizedBox(height: 12),
-                _itemsList(),
+                _sectionTitle('🔥 Habits'),
+                ...habits.map((h) => _itemCard(h, isToday)),
+                const SizedBox(height: 12),
+                _sectionTitle('✅ Tasks'),
+                ...tasks.map((t) => _itemCard(t, isToday)),
                 const SizedBox(height: 120),
               ]),
             ),
