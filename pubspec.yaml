@@ -18,18 +18,20 @@ dependencies:
   http: ^1.2.0
   shared_preferences: ^2.2.2
 
-  # Audio for mentors & nudges
+  # Audio (optional for later mentor alarms)
   audioplayers: ^5.2.1
 
-  # Local notifications & alarms
+  # Local notifications & timezones (front-end only)
   flutter_local_notifications: ^18.0.1
   timezone: ^0.9.4
+
+  # Utils
   uuid: ^4.5.1
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^4.0.0  # ✅ compatible with Dart 3.4.3
+  flutter_lints: ^4.0.0
 
 flutter:
   uses-material-design: true
