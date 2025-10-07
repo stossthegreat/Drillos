@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class HabitCreateEditModal extends StatefulWidget {
   final Map<String, dynamic> formData;
@@ -21,38 +22,59 @@ class HabitCreateEditModal extends StatefulWidget {
   State<HabitCreateEditModal> createState() => _HabitCreateEditModalState();
 }
 
-class _HabitCreateEditModalState extends State<HabitCreateEditModal> with SingleTickerProviderStateMixin {
+class _HabitCreateEditModalState extends State<HabitCreateEditModal>
+    with SingleTickerProviderStateMixin {
   late Map<String, dynamic> _formData;
   late AnimationController _animationController;
   late Animation<double> _slideAnimation;
-  
+
   final _nameController = TextEditingController();
   final _categoryController = TextEditingController();
   final _everyNController = TextEditingController();
+
+  // mentor choices
+  final List<Map<String, String>> _mentorChoices = const [
+    {'id': 'standard', 'label': 'Standard (no voice)'},
+    {'id': 'drill-sergeant', 'label': 'Drill Sergeant (default)'},
+    {'id': 'marcus', 'label': 'Marcus Aurelius'},
+    {'id': 'confucius', 'label': 'Confucius'},
+    {'id': 'buddha', 'label': 'Buddha'},
+    {'id': 'lincoln', 'label': 'Abraham Lincoln'},
+  ];
 
   @override
   void initState() {
     super.initState();
     _formData = Map.from(widget.formData);
-    
+
     _nameController.text = _formData['name'] ?? '';
     _categoryController.text = _formData['category'] ?? '';
     _everyNController.text = (_formData['everyN'] ?? 2).toString();
-    
+
+    // default mentor logic:
+    // if form doesn’t carry mentorVoice, load global default (or Drill Sergeant fallback)
+    if ((_formData['mentorVoice'] == null || (_formData['mentorVoice'] as String).isEmpty)) {
+      _initDefaultMentor();
+    }
+
     _animationController = AnimationController(
       duration: const Duration(milliseconds: 300),
       vsync: this,
     );
-    
-    _slideAnimation = Tween<double>(
-      begin: 1.0,
-      end: 0.0,
-    ).animate(CurvedAnimation(
-      parent: _animationController,
-      curve: Curves.easeOutCubic,
-    ));
-    
+
+    _slideAnimation = Tween<double>(begin: 1.0, end: 0.0).animate(
+      CurvedAnimation(parent: _animationController, curve: Curves.easeOutCubic),
+    );
+
     _animationController.forward();
+  }
+
+  Future<void> _initDefaultMentor() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getString('defaultMentorVoice') ?? 'drill-sergeant';
+    setState(() {
+      _formData['mentorVoice'] = saved; // default DS
+    });
   }
 
   @override
@@ -75,49 +97,54 @@ class _HabitCreateEditModalState extends State<HabitCreateEditModal> with Single
       HapticFeedback.heavyImpact();
       return;
     }
-    
+
     _formData['name'] = _nameController.text.trim();
     _formData['category'] = _categoryController.text.trim();
     if (_formData['frequency'] == 'everyN') {
       _formData['everyN'] = int.tryParse(_everyNController.text) ?? 2;
     }
-    
+    // ensure mentorVoice present
+    _formData['mentorVoice'] = (_formData['mentorVoice'] as String?)?.trim().isNotEmpty == true
+        ? _formData['mentorVoice']
+        : 'drill-sergeant';
+
     HapticFeedback.selectionClick();
     widget.onSave(_formData);
   }
 
   void _cancel() {
-    _animationController.reverse().then((_) {
-      widget.onCancel();
-    });
+    _animationController.reverse().then((_) => widget.onCancel());
   }
 
   String get _modalTitle {
     final action = widget.isEditing ? 'Edit' : 'New';
-    final type = _formData['type'] == 'habit' ? 'Habit' :
-                 _formData['type'] == 'task' ? 'Task' : 'Bad Habit';
+    final type = _formData['type'] == 'habit'
+        ? 'Habit'
+        : _formData['type'] == 'task'
+            ? 'Task'
+            : 'Bad Habit';
     return '$action $type';
   }
 
   Widget _buildColorPicker() {
+    // Some callers passed only 'color'; support both 'color' and 'bgColor'
+    Color _chipColorOf(Map<String, dynamic> opt) {
+      final c = opt['bgColor'] ?? opt['color'];
+      return (c is Color) ? c : const Color(0xFF10B981);
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          'Color',
-          style: TextStyle(
-            color: Colors.white70,
-            fontSize: 12,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
+        const Text('Color',
+            style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w500)),
         const SizedBox(height: 8),
         Row(
-          children: widget.colorOptions.map((colorOption) {
-            final isSelected = _formData['color'] == colorOption['name'];
+          children: widget.colorOptions.map((opt) {
+            final isSelected = _formData['color'] == opt['name'];
             return GestureDetector(
               onTap: () {
-                _updateFormData('color', colorOption['name']);
+                _updateFormData('color', opt['name']);
                 HapticFeedback.selectionClick();
               },
               child: Container(
@@ -125,7 +152,7 @@ class _HabitCreateEditModalState extends State<HabitCreateEditModal> with Single
                 height: 32,
                 margin: const EdgeInsets.only(right: 8),
                 decoration: BoxDecoration(
-                  color: colorOption['bgColor'],
+                  color: _chipColorOf(opt),
                   borderRadius: BorderRadius.circular(8),
                   border: isSelected ? Border.all(color: Colors.white, width: 2) : null,
                 ),
@@ -146,14 +173,8 @@ class _HabitCreateEditModalState extends State<HabitCreateEditModal> with Single
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          label,
-          style: const TextStyle(
-            color: Colors.white70,
-            fontSize: 12,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
+        Text(label,
+            style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w500)),
         const SizedBox(height: 8),
         TextField(
           controller: controller,
@@ -191,14 +212,8 @@ class _HabitCreateEditModalState extends State<HabitCreateEditModal> with Single
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          label,
-          style: const TextStyle(
-            color: Colors.white70,
-            fontSize: 12,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
+        Text(label,
+            style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w500)),
         const SizedBox(height: 8),
         GestureDetector(
           onTap: () async {
@@ -232,9 +247,7 @@ class _HabitCreateEditModalState extends State<HabitCreateEditModal> with Single
                 Expanded(
                   child: Text(
                     value.isEmpty ? 'Select date' : value,
-                    style: TextStyle(
-                      color: value.isEmpty ? Colors.white30 : Colors.white,
-                    ),
+                    style: TextStyle(color: value.isEmpty ? Colors.white30 : Colors.white),
                   ),
                 ),
                 const Icon(Icons.calendar_today, color: Colors.white70, size: 20),
@@ -255,14 +268,8 @@ class _HabitCreateEditModalState extends State<HabitCreateEditModal> with Single
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          label,
-          style: const TextStyle(
-            color: Colors.white70,
-            fontSize: 12,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
+        Text(label,
+            style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w500)),
         const SizedBox(height: 8),
         DropdownButtonFormField<String>(
           value: value,
@@ -288,10 +295,7 @@ class _HabitCreateEditModalState extends State<HabitCreateEditModal> with Single
             contentPadding: const EdgeInsets.all(12),
           ),
           items: options.map((option) {
-            return DropdownMenuItem<String>(
-              value: option,
-              child: Text(option),
-            );
+            return DropdownMenuItem<String>(value: option, child: Text(option));
           }).toList(),
         ),
       ],
@@ -302,21 +306,15 @@ class _HabitCreateEditModalState extends State<HabitCreateEditModal> with Single
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          'Intensity',
-          style: TextStyle(
-            color: Colors.white70,
-            fontSize: 12,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
+        const Text('Intensity',
+            style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w500)),
         const SizedBox(height: 8),
         Row(
-          children: [1, 2, 3].map((intensity) {
-            final isSelected = _formData['intensity'] == intensity;
+          children: [1, 2, 3].map((i) {
+            final isSelected = _formData['intensity'] == i;
             return GestureDetector(
               onTap: () {
-                _updateFormData('intensity', intensity);
+                _updateFormData('intensity', i);
                 HapticFeedback.selectionClick();
               },
               child: Container(
@@ -332,7 +330,7 @@ class _HabitCreateEditModalState extends State<HabitCreateEditModal> with Single
                 ),
                 child: Center(
                   child: Text(
-                    'I$intensity',
+                    'I$i',
                     style: TextStyle(
                       color: isSelected ? Colors.black : Colors.white70,
                       fontWeight: FontWeight.w600,
@@ -347,60 +345,106 @@ class _HabitCreateEditModalState extends State<HabitCreateEditModal> with Single
     );
   }
 
+  Widget _buildMentorSelector() {
+    final current = (_formData['mentorVoice'] as String?) ?? 'drill-sergeant';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('Alarm Voice',
+            style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w500)),
+        const SizedBox(height: 8),
+        DropdownButtonFormField<String>(
+          value: current,
+          onChanged: (val) {
+            if (val == null) return;
+            _updateFormData('mentorVoice', val);
+            HapticFeedback.selectionClick();
+          },
+          style: const TextStyle(color: Colors.white),
+          dropdownColor: const Color(0xFF121816),
+          decoration: InputDecoration(
+            filled: true,
+            fillColor: const Color(0xFF0B0F0E),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
+            ),
+            contentPadding: const EdgeInsets.all(12),
+          ),
+          items: _mentorChoices
+              .map(
+                (m) => DropdownMenuItem<String>(
+                  value: m['id'],
+                  child: Text(m['label']!),
+                ),
+              )
+              .toList(),
+        ),
+        const SizedBox(height: 8),
+        TextButton.icon(
+          onPressed: () async {
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.setString('defaultMentorVoice', _formData['mentorVoice'] ?? 'drill-sergeant');
+            if (!mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Default alarm voice saved')),
+            );
+          },
+          icon: const Icon(Icons.push_pin_outlined, size: 16, color: Colors.white70),
+          label: const Text('Set as default', style: TextStyle(color: Colors.white70)),
+        ),
+      ],
+    );
+  }
+
   Widget _buildReminderSection() {
+    final enabled = _formData['reminderOn'] == true;
+    final time = _formData['reminderTime'] ?? '08:00';
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           children: [
-            const Text(
-              'Reminder',
-              style: TextStyle(
-                color: Colors.white70,
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
+            const Text('Reminder',
+                style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w500)),
             const SizedBox(width: 12),
             Switch(
-              value: _formData['reminderOn'] ?? false,
-              onChanged: (value) {
-                _updateFormData('reminderOn', value);
+              value: enabled,
+              onChanged: (v) {
+                _updateFormData('reminderOn', v);
                 HapticFeedback.selectionClick();
               },
               activeColor: const Color(0xFF10B981),
             ),
-            const Text(
-              'Enable',
-              style: TextStyle(
-                color: Colors.white70,
-                fontSize: 12,
-              ),
-            ),
+            const Text('Enable', style: TextStyle(color: Colors.white70, fontSize: 12)),
           ],
         ),
-        if (_formData['reminderOn'] == true) ...[
+        if (enabled) ...[
           const SizedBox(height: 12),
           GestureDetector(
             onTap: () async {
               final picked = await showTimePicker(
                 context: context,
                 initialTime: TimeOfDay.fromDateTime(
-                  DateTime.tryParse('2023-01-01 ${_formData['reminderTime']}:00') ?? 
-                  DateTime.now(),
+                  DateTime.tryParse('2023-01-01 $time:00') ?? DateTime.now(),
                 ),
-                builder: (context, child) {
-                  return Theme(
-                    data: ThemeData.dark().copyWith(
-                      colorScheme: const ColorScheme.dark(primary: Color(0xFF10B981)),
-                    ),
-                    child: child!,
-                  );
-                },
+                builder: (context, child) => Theme(
+                  data: ThemeData.dark().copyWith(
+                    colorScheme: const ColorScheme.dark(primary: Color(0xFF10B981)),
+                  ),
+                  child: child!,
+                ),
               );
               if (picked != null) {
-                final timeString = '${picked.hour.toString().padLeft(2, '0')}:${picked.minute.toString().padLeft(2, '0')}';
-                _updateFormData('reminderTime', timeString);
+                final hh = picked.hour.toString().padLeft(2, '0');
+                final mm = picked.minute.toString().padLeft(2, '0');
+                _updateFormData('reminderTime', '$hh:$mm');
               }
             },
             child: Container(
@@ -415,14 +459,13 @@ class _HabitCreateEditModalState extends State<HabitCreateEditModal> with Single
                 children: [
                   const Icon(Icons.access_time, color: Colors.white70, size: 20),
                   const SizedBox(width: 8),
-                  Text(
-                    _formData['reminderTime'] ?? '08:00',
-                    style: const TextStyle(color: Colors.white),
-                  ),
+                  Text(time, style: const TextStyle(color: Colors.white)),
                 ],
               ),
             ),
           ),
+          const SizedBox(height: 16),
+          _buildMentorSelector(), // <— NEW: choose mentor voice for this habit
         ],
       ],
     );
@@ -438,15 +481,7 @@ class _HabitCreateEditModalState extends State<HabitCreateEditModal> with Single
           child: Stack(
             children: [
               // Backdrop
-              GestureDetector(
-                onTap: _cancel,
-                child: Container(
-                  color: Colors.transparent,
-                  width: double.infinity,
-                  height: double.infinity,
-                ),
-              ),
-              
+              GestureDetector(onTap: _cancel, child: Container(color: Colors.transparent)),
               // Modal content
               Positioned(
                 left: 0,
@@ -465,14 +500,9 @@ class _HabitCreateEditModalState extends State<HabitCreateEditModal> with Single
                         padding: const EdgeInsets.all(20),
                         child: Row(
                           children: [
-                            Text(
-                              _modalTitle,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
+                            Text(_modalTitle,
+                                style: const TextStyle(
+                                    color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
                             const Spacer(),
                             IconButton(
                               onPressed: _cancel,
@@ -488,22 +518,19 @@ class _HabitCreateEditModalState extends State<HabitCreateEditModal> with Single
                           ],
                         ),
                       ),
-                      
-                      // Form content
+
+                      // Form
                       Container(
-                        constraints: BoxConstraints(
-                          maxHeight: MediaQuery.of(context).size.height * 0.8,
-                        ),
+                        constraints:
+                            BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.8),
                         child: SingleChildScrollView(
                           padding: const EdgeInsets.symmetric(horizontal: 20),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              // Color picker
                               _buildColorPicker(),
                               const SizedBox(height: 20),
-                              
-                              // Form fields in grid
+
                               Row(
                                 children: [
                                   Expanded(
@@ -523,14 +550,14 @@ class _HabitCreateEditModalState extends State<HabitCreateEditModal> with Single
                                 ],
                               ),
                               const SizedBox(height: 16),
-                              
+
                               Row(
                                 children: [
                                   Expanded(
                                     child: _buildDateField(
                                       label: 'Start date',
                                       value: _formData['startDate'] ?? '',
-                                      onChanged: (value) => _updateFormData('startDate', value),
+                                      onChanged: (v) => _updateFormData('startDate', v),
                                     ),
                                   ),
                                   const SizedBox(width: 12),
@@ -538,22 +565,21 @@ class _HabitCreateEditModalState extends State<HabitCreateEditModal> with Single
                                     child: _buildDateField(
                                       label: 'End date',
                                       value: _formData['endDate'] ?? '',
-                                      onChanged: (value) => _updateFormData('endDate', value),
+                                      onChanged: (v) => _updateFormData('endDate', v),
                                     ),
                                   ),
                                 ],
                               ),
                               const SizedBox(height: 16),
-                              
-                              // Frequency (now available for ALL types!)
+
                               Row(
                                 children: [
                                   Expanded(
                                     child: _buildDropdown(
                                       label: 'Repeat',
                                       value: _formData['frequency'] ?? 'daily',
-                                      options: ['daily', 'weekdays', 'weekends', 'everyN', 'custom'],
-                                      onChanged: (value) => _updateFormData('frequency', value),
+                                      options: const ['daily', 'weekdays', 'weekends', 'everyN', 'custom'],
+                                      onChanged: (v) => _updateFormData('frequency', v),
                                     ),
                                   ),
                                   if (_formData['frequency'] == 'everyN') ...[
@@ -569,16 +595,13 @@ class _HabitCreateEditModalState extends State<HabitCreateEditModal> with Single
                                 ],
                               ),
                               const SizedBox(height: 16),
-                              
-                              // Intensity
+
                               _buildIntensitySelector(),
                               const SizedBox(height: 20),
-                              
-                              // Reminder
+
                               _buildReminderSection(),
                               const SizedBox(height: 32),
-                              
-                              // Action buttons
+
                               Row(
                                 children: [
                                   Expanded(
@@ -590,15 +613,12 @@ class _HabitCreateEditModalState extends State<HabitCreateEditModal> with Single
                                           color: Colors.white.withOpacity(0.1),
                                           borderRadius: BorderRadius.circular(12),
                                         ),
-                                        child: const Text(
-                                          'Cancel',
-                                          textAlign: TextAlign.center,
-                                          style: TextStyle(
-                                            color: Colors.white,
-                                            fontSize: 16,
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                        ),
+                                        child: const Text('Cancel',
+                                            textAlign: TextAlign.center,
+                                            style: TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 16,
+                                                fontWeight: FontWeight.w600)),
                                       ),
                                     ),
                                   ),
@@ -612,15 +632,12 @@ class _HabitCreateEditModalState extends State<HabitCreateEditModal> with Single
                                           color: const Color(0xFF10B981),
                                           borderRadius: BorderRadius.circular(12),
                                         ),
-                                        child: const Text(
-                                          'Save',
-                                          textAlign: TextAlign.center,
-                                          style: TextStyle(
-                                            color: Colors.black,
-                                            fontSize: 16,
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                        ),
+                                        child: const Text('Save',
+                                            textAlign: TextAlign.center,
+                                            style: TextStyle(
+                                                color: Colors.black,
+                                                fontSize: 16,
+                                                fontWeight: FontWeight.w600)),
                                       ),
                                     ),
                                   ),
@@ -641,4 +658,4 @@ class _HabitCreateEditModalState extends State<HabitCreateEditModal> with Single
       },
     );
   }
-} 
+}
