@@ -1,3 +1,4 @@
+// lib/main.dart
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'design/theme.dart';
@@ -6,7 +7,7 @@ import 'screens/new_home_screen.dart';
 import 'screens/habits_screen.dart';
 import 'screens/new_habits_screen.dart';
 import 'screens/streaks_screen.dart';
-import 'screens/chat_screen.dart';
+import 'screens/alarm_page.dart'; // ⬅️ your new alarm page
 import 'screens/settings_screen.dart';
 import 'screens/design_gallery.dart';
 import 'widgets/root_shell.dart';
@@ -20,41 +21,58 @@ const String kDailyTestAlarmTime = "08:00";
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  print('✅ DrillOS starting...');
+  debugPrint('✅ DrillOS starting...');
 
   // 🌐 Configure API endpoint
   const apiUrl = String.fromEnvironment('API_BASE_URL', defaultValue: '');
-  if (apiUrl.isEmpty) {
-    apiClient.setBaseUrl('https://drillos-production.up.railway.app');
-  } else {
-    apiClient.setBaseUrl(apiUrl);
-  }
+  apiClient.setBaseUrl(
+    apiUrl.isEmpty
+        ? 'https://drillos-production.up.railway.app'
+        : apiUrl,
+  );
 
-  // 🔔 Initialize alarm service (safe)
+  // ⚙️ Initialize alarm system
   try {
     await alarmService.init();
-    await alarmService.requestPermissions();
-    await alarmService.scheduleAlarm(
-      habitId: '__test_alarm__',
-      habitName: 'Test Alarm',
-      time: kDailyTestAlarmTime,
-      daysOfWeek: const [1, 2, 3, 4, 5, 6, 7],
-      mentorMessage: 'DrillOS test alarm fired successfully!',
-    );
-    print('✅ Test alarm scheduled');
+    debugPrint('✅ Alarm service initialized');
   } catch (e) {
-    print('⚠️ Alarm init failed: $e');
+    debugPrint('⚠️ Alarm init failed: $e');
   }
 
   runApp(const DrillSergeantApp());
 }
 
-class DrillSergeantApp extends StatelessWidget {
+class DrillSergeantApp extends StatefulWidget {
   const DrillSergeantApp({super.key});
+  @override
+  State<DrillSergeantApp> createState() => _DrillSergeantAppState();
+}
+
+class _DrillSergeantAppState extends State<DrillSergeantApp> {
+  @override
+  void initState() {
+    super.initState();
+    _postInit();
+  }
+
+  Future<void> _postInit() async {
+    try {
+      await alarmService.requestPermissions();
+      await alarmService.scheduleAlarm(
+        habitId: '__test_alarm__',
+        habitName: 'Test Alarm',
+        time: kDailyTestAlarmTime,
+        daysOfWeek: const [1, 2, 3, 4, 5, 6, 7],
+        mentorMessage: 'DrillOS test alarm fired successfully!',
+      );
+      debugPrint('✅ Test alarm scheduled');
+    } catch (e) {
+      debugPrint('⚠️ Alarm schedule failed: $e');
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    print('🧭 GoRouter initialized');
     final router = GoRouter(
       initialLocation: '/onboarding',
       routes: [
@@ -82,22 +100,12 @@ class DrillSergeantApp extends StatelessWidget {
               builder: (context, state) => const NewHabitsScreen(),
             ),
             GoRoute(
-              path: '/home-old',
-              builder: (context, state) => HomeScreen(
-                refreshTrigger: state.uri.queryParameters['refresh'],
-              ),
-            ),
-            GoRoute(
-              path: '/habits-old',
-              builder: (context, state) => const HabitsScreen(),
-            ),
-            GoRoute(
               path: '/streaks',
               builder: (context, state) => const StreaksScreen(),
             ),
             GoRoute(
-              path: '/chat',
-              builder: (context, state) => const ChatScreen(),
+              path: '/alarm', // 🔔 Now points to your alarm_page.dart
+              builder: (context, state) => const AlarmPage(),
             ),
             GoRoute(
               path: '/settings',
@@ -118,18 +126,16 @@ class DrillSergeantApp extends StatelessWidget {
           ],
         ),
       ],
-      errorBuilder: (context, state) {
-        return Scaffold(
-          backgroundColor: Colors.black,
-          body: Center(
-            child: Text(
-              '⚠️ Route not found: ${state.error}',
-              style: const TextStyle(color: Colors.white),
-              textAlign: TextAlign.center,
-            ),
+      errorBuilder: (context, state) => Scaffold(
+        backgroundColor: Colors.black,
+        body: Center(
+          child: Text(
+            '⚠️ Route not found: ${state.error}',
+            style: const TextStyle(color: Colors.white),
+            textAlign: TextAlign.center,
           ),
-        );
-      },
+        ),
+      ),
     );
 
     return MaterialApp.router(
@@ -137,22 +143,19 @@ class DrillSergeantApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: buildDarkTheme(),
       routerConfig: router,
-      builder: (context, child) {
-        // ✅ Safety fallback to prevent black screen
-        return Directionality(
-          textDirection: TextDirection.ltr,
-          child: child ??
-              const Scaffold(
-                backgroundColor: Colors.black,
-                body: Center(
-                  child: Text(
-                    '⚠️ Failed to load route',
-                    style: TextStyle(color: Colors.white),
-                  ),
+      builder: (context, child) => Directionality(
+        textDirection: TextDirection.ltr,
+        child: child ??
+            const Scaffold(
+              backgroundColor: Colors.black,
+              body: Center(
+                child: Text(
+                  '⚠️ Failed to load route',
+                  style: TextStyle(color: Colors.white),
                 ),
               ),
-        );
-      },
+            ),
+      ),
     );
   }
 }
