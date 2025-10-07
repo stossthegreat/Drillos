@@ -16,14 +16,14 @@ import 'screens/anti_habit_detail_screen.dart';
 import 'services/api_client.dart';
 import 'services/alarm_service.dart';
 
-/// 👉 Change this to the specific time you want your **daily test alarm**
-/// Format: "HH:mm" in 24h (e.g., "08:00" = 8 AM, "20:30" = 8:30 PM)
+/// 👉 Change this to the specific time you want your test alarm to fire
+/// Use 24-hour format, e.g. "08:00" = 8 AM, "20:30" = 8:30 PM
 const String kDailyTestAlarmTime = "08:00";
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Configure API (unchanged)
+  // 🌐 Configure API endpoint
   const apiUrl = String.fromEnvironment('API_BASE_URL', defaultValue: '');
   if (apiUrl.isEmpty) {
     apiClient.setBaseUrl('https://drillos-production.up.railway.app');
@@ -31,18 +31,17 @@ Future<void> main() async {
     apiClient.setBaseUrl(apiUrl);
   }
 
-  // ✅ Initialize local alarms (front-end only)
+  // 🔔 Initialize alarm service (local only)
   await alarmService.init();
-  await alarmService.requestPermissions(); // no-op on Android < 13
+  await alarmService.requestPermissions();
 
-  // ✅ Always (re)schedule a daily **test** alarm at kDailyTestAlarmTime
-  // This is independent of user habits so you can verify notifications fire.
+  // ✅ Schedule a daily test alarm (for verification)
   await alarmService.scheduleAlarm(
     habitId: '__test_alarm__',
     habitName: 'Test Alarm',
     time: kDailyTestAlarmTime,
-    daysOfWeek: const [1, 2, 3, 4, 5, 6, 7], // Mon..Sun
-    mentorMessage: '🔔 This is your DrillOS test alarm.',
+    daysOfWeek: const [1, 2, 3, 4, 5, 6, 7],
+    mentorMessage: '🔔 DrillOS test alarm fired successfully!',
   );
 
   runApp(const DrillSergeantApp());
@@ -114,7 +113,9 @@ class DrillSergeantApp extends StatelessWidget {
               ),
             ),
           ],
-    );
+        ),
+      ],
+    ); // ✅ everything now closed properly
 
     return MaterialApp.router(
       title: 'Drill OS',
@@ -123,4 +124,4 @@ class DrillSergeantApp extends StatelessWidget {
       routerConfig: router,
     );
   }
-        }
+}
