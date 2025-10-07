@@ -4,7 +4,6 @@ import 'design/theme.dart';
 import 'screens/home_screen.dart';
 import 'screens/new_home_screen.dart';
 import 'screens/habits_screen.dart';
-// ✅ remove duplicate import – only this one
 import 'screens/new_habits_screen.dart';
 import 'screens/streaks_screen.dart';
 import 'screens/chat_screen.dart';
@@ -15,17 +14,36 @@ import 'screens/onboarding_screen.dart';
 import 'screens/habit_detail_screen.dart';
 import 'screens/anti_habit_detail_screen.dart';
 import 'services/api_client.dart';
+import 'services/alarm_service.dart';
 
-void main() {
+/// 👉 Change this to the specific time you want your **daily test alarm**
+/// Format: "HH:mm" in 24h (e.g., "08:00" = 8 AM, "20:30" = 8:30 PM)
+const String kDailyTestAlarmTime = "08:00";
+
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // 🌐 Configure API URL
+  // Configure API (unchanged)
   const apiUrl = String.fromEnvironment('API_BASE_URL', defaultValue: '');
   if (apiUrl.isEmpty) {
     apiClient.setBaseUrl('https://drillos-production.up.railway.app');
   } else {
     apiClient.setBaseUrl(apiUrl);
   }
+
+  // ✅ Initialize local alarms (front-end only)
+  await alarmService.init();
+  await alarmService.requestPermissions(); // no-op on Android < 13
+
+  // ✅ Always (re)schedule a daily **test** alarm at kDailyTestAlarmTime
+  // This is independent of user habits so you can verify notifications fire.
+  await alarmService.scheduleAlarm(
+    habitId: '__test_alarm__',
+    habitName: 'Test Alarm',
+    time: kDailyTestAlarmTime,
+    daysOfWeek: const [1, 2, 3, 4, 5, 6, 7], // Mon..Sun
+    mentorMessage: '🔔 This is your DrillOS test alarm.',
+  );
 
   runApp(const DrillSergeantApp());
 }
@@ -53,15 +71,13 @@ class DrillSergeantApp extends StatelessWidget {
           routes: [
             GoRoute(
               path: '/home',
-              // ❌ remove const
               builder: (context, state) => NewHomeScreen(
                 refreshTrigger: state.uri.queryParameters['refresh'],
               ),
             ),
             GoRoute(
               path: '/habits',
-              // ❌ remove const
-              builder: (context, state) => NewHabitsScreen(),
+              builder: (context, state) => const NewHabitsScreen(),
             ),
             GoRoute(
               path: '/home-old',
@@ -98,8 +114,6 @@ class DrillSergeantApp extends StatelessWidget {
               ),
             ),
           ],
-        ),
-      ],
     );
 
     return MaterialApp.router(
@@ -109,4 +123,4 @@ class DrillSergeantApp extends StatelessWidget {
       routerConfig: router,
     );
   }
-}
+        }
