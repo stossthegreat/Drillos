@@ -202,7 +202,7 @@ class HabitService {
         final completedToday = await _storage.isCompletedOn(habit['id'], today);
         if (!completedToday) {
           todayHabits.add({
-            ...habit,
+            ...Map<String, dynamic>.from(habit),
             'completed': false,
           });
         }
@@ -225,7 +225,7 @@ class HabitService {
         final streak = await _storage.getStreak(habit['id']);
         
         todayHabits.add({
-          ...habit,
+          ...Map<String, dynamic>.from(habit),
           'completed': completed,
           'streak': streak,
         });
