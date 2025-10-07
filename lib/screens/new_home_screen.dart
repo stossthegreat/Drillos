@@ -1,16 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_client.dart';
-import '../services/local_storage.dart';
 import '../services/habit_service.dart';
 import '../design/feedback.dart';
-import '../widgets/habit_create_edit_modal.dart';
+import '../audio/tts_provider.dart';
 import '../logic/habit_engine.dart';
-import '../utils/schedule.dart';
+import '../widgets/xp_hud.dart';
 
-/// 🧠 DrillOS — New Home Screen
-/// Fully renamed + cleaned up. Handles habit/task display, streaks, toggles, and UI.
 class NewHomeScreen extends StatefulWidget {
   final String? refreshTrigger;
   const NewHomeScreen({super.key, this.refreshTrigger});
@@ -20,233 +16,164 @@ class NewHomeScreen extends StatefulWidget {
 }
 
 class _NewHomeScreenState extends State<NewHomeScreen> with TickerProviderStateMixin {
-  List<dynamic> allItems = [];
+  // Audio
+  final tts = TtsProvider();
+
+  // Data
+  Map<String, dynamic> briefData = {};
+  List<Map<String, dynamic>> todayItems = [];
+  Map<String, dynamic>? currentNudge;
   bool isLoading = true;
+  String? lastRefreshTrigger;
+
+  // UI
   DateTime selectedDate = DateTime.now();
-  String filterTab = 'habits';
-  bool showCreateModal = false;
-  bool showSpeedDial = false;
-  Map<String, dynamic> formData = {};
-  bool isEditing = false;
+  late AnimationController _progressController;
 
-  late AnimationController _speedDialController;
-  late AnimationController _modalController;
-
-  final List<Map<String, dynamic>> colorOptions = [
-    {'name': 'emerald', 'color': const Color(0xFF10B981)},
-    {'name': 'amber', 'color': const Color(0xFFF59E0B)},
-    {'name': 'sky', 'color': const Color(0xFF0EA5E9)},
-    {'name': 'rose', 'color': const Color(0xFFE11D48)},
-    {'name': 'violet', 'color': const Color(0xFF8B5CF6)},
-    {'name': 'slate', 'color': const Color(0xFF64748B)},
+  // Colors
+  final List<Map<String, dynamic>> colorOptions = const [
+    {'name': 'emerald', 'color': Color(0xFF10B981), 'neon': Color(0xFF34D399)},
+    {'name': 'amber',   'color': Color(0xFFF59E0B), 'neon': Color(0xFFFBBF24)},
+    {'name': 'sky',     'color': Color(0xFF0EA5E9), 'neon': Color(0xFF38BDF8)},
+    {'name': 'rose',    'color': Color(0xFFE11D48), 'neon': Color(0xFFF43F5E)},
+    {'name': 'violet',  'color': Color(0xFF8B5CF6), 'neon': Color(0xFFA78BFA)},
+    {'name': 'slate',   'color': Color(0xFF64748B), 'neon': Color(0xFF94A3B8)},
   ];
 
-  String formatDate(DateTime date) => date.toIso8601String().split('T')[0];
-
+  // Helpers
+  String formatDate(DateTime d) => d.toIso8601String().split('T').first;
   List<DateTime> get weekDates {
-    final startOfWeek = selectedDate.subtract(Duration(days: selectedDate.weekday % 7));
-    return List.generate(7, (index) => startOfWeek.add(Duration(days: index)));
+    final start = selectedDate.subtract(Duration(days: selectedDate.weekday % 7));
+    return List.generate(7, (i) => start.add(Duration(days: i)));
+  }
+
+  Color _colorForItem(Map<String, dynamic> item) {
+    final name = item['color'] ?? 'emerald';
+    return (colorOptions.firstWhere(
+      (c) => c['name'] == name,
+      orElse: () => colorOptions[0],
+    )['color']) as Color;
+  }
+
+  Color _neonForItem(Map<String, dynamic> item) {
+    final name = item['color'] ?? 'emerald';
+    return (colorOptions.firstWhere(
+      (c) => c['name'] == name,
+      orElse: () => colorOptions[0],
+    )['neon']) as Color;
   }
 
   @override
   void initState() {
     super.initState();
-    _speedDialController = AnimationController(vsync: this, duration: const Duration(milliseconds: 200));
-    _modalController = AnimationController(vsync: this, duration: const Duration(milliseconds: 300));
+    _progressController = AnimationController(vsync: this, duration: const Duration(milliseconds: 800));
+    lastRefreshTrigger = widget.refreshTrigger;
     _loadData();
-    _resetForm();
+  }
+
+  @override
+  void didUpdateWidget(covariant NewHomeScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.refreshTrigger != null && widget.refreshTrigger != lastRefreshTrigger) {
+      lastRefreshTrigger = widget.refreshTrigger;
+      _loadData();
+    }
   }
 
   @override
   void dispose() {
-    _speedDialController.dispose();
-    _modalController.dispose();
+    _progressController.dispose();
     super.dispose();
   }
 
-  void _resetForm() {
-    formData = {
-      'id': null,
-      'type': 'habit',
-      'name': '',
-      'category': 'General',
-      'startDate': formatDate(DateTime.now()),
-      'endDate': '',
-      'frequency': 'daily',
-      'everyN': 2,
-      'color': 'emerald',
-      'intensity': 2,
-      'reminderOn': false,
-      'reminderTime': '08:00',
-    };
-  }
-
   Future<void> _loadData() async {
-    setState(() => isLoading = true);
+    if (mounted) setState(() => isLoading = true);
     try {
+      // Reset streaks that should break (local logic)
       await HabitEngine.checkStreakResets();
-      final storage = localStorage;
-      final habits = await storage.getAllHabits();
 
-      final enriched = await Future.wait(habits.map((item) async {
-        final id = item['id'];
-        final type = item['type'] ?? 'habit';
-        if (type == 'habit') {
-          final streak = await storage.getStreak(id);
-          final completed = await storage.isCompletedOn(id, DateTime.now());
-          return {...item, 'streak': streak, 'completed': completed};
-        }
-        return item;
-      }));
+      // ✅ KEY: Only returns habits due TODAY (schedule already applied inside service)
+      final items = await habitService.getTodayHabits();
 
-      final tasks = await apiClient.getTasks().catchError((_) => <Map<String, dynamic>>[]);
-      final combined = [...enriched];
-      for (final task in tasks) {
-        if (!combined.any((i) => i['id'] == task['id'])) {
-          combined.add({...task, 'type': 'task'});
-        }
+      // Optional brief + nudge (non-blocking semantics preserved)
+      final brief = await apiClient.getBrief().catchError((_) => <String, dynamic>{});
+      Map<String, dynamic>? nudge;
+      try {
+        nudge = await apiClient.getNudge();
+      } catch (_) {
+        nudge = null;
       }
 
+      final stats = await HabitEngine.getStats();
+
+      if (!mounted) return;
       setState(() {
-        allItems = combined;
+        todayItems = items.map((e) => Map<String, dynamic>.from(e)).toList();
+        briefData = {...brief, 'stats': stats};
+        currentNudge = nudge;
         isLoading = false;
       });
+
+      _progressController.forward();
     } catch (e) {
-      print('❌ Error loading data: $e');
-      setState(() => isLoading = false);
+      // Keep app running even if network fails
+      if (mounted) setState(() => isLoading = false);
     }
   }
 
-  List<dynamic> get filteredItems {
-    return allItems.where((item) {
-      switch (filterTab) {
-        case 'tasks':
-          return item['type'] == 'task';
-        case 'bad':
-          return item['type'] == 'bad' || item['category'] == 'anti-habit';
-        default:
-          return item['type'] == 'habit' || item['type'] == null;
-      }
-    }).toList();
-  }
-
-  /// ✅ Toggle completion + streak logic
-  Future<void> _toggleCompletion(String itemId, DateTime date) async {
+  // Unified completion handler for the visible list
+  Future<void> _toggleTodayItemCompletion(Map<String, dynamic> item) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final key = 'done:$itemId:${formatDate(date)}';
-      final wasDone = prefs.getBool(key) ?? false;
-      final nowDone = !wasDone;
+      final id = item['id'].toString();
+      final type = (item['type'] ?? 'habit').toString();
 
-      await prefs.setBool(key, nowDone);
-
-      // update streaks
-      final streakKey = 'streak:$itemId';
-      int currentStreak = prefs.getInt(streakKey) ?? 0;
-
-      if (nowDone) {
-        final lastDateStr = prefs.getString('lastComplete:$itemId');
-        if (lastDateStr != null) {
-          final lastDate = DateTime.tryParse(lastDateStr);
-          final diff = lastDate == null ? 99 : date.difference(lastDate).inDays;
-          currentStreak = (diff == 1) ? currentStreak + 1 : 1;
-        } else {
-          currentStreak = 1;
+      if (type == 'task') {
+        // Local-first task completion
+        if (mounted) {
+          setState(() {
+            final i = todayItems.indexWhere((x) => x['id'] == id);
+            if (i != -1) todayItems[i] = {...todayItems[i], 'completed': true};
+          });
         }
-        await prefs.setString('lastComplete:$itemId', date.toIso8601String());
-        final xpKey = 'xp:$itemId';
-        final oldXp = prefs.getInt(xpKey) ?? 0;
-        await prefs.setInt(xpKey, oldXp + 15);
+        await habitService.completeTaskLocal(id);
+        apiClient.completeTask(id).catchError((_) {});
+      } else {
+        // Habit: mark complete immediately for snappy UI
+        if (mounted) {
+          setState(() {
+            final i = todayItems.indexWhere((x) => x['id'] == id);
+            if (i != -1) todayItems[i] = {...todayItems[i], 'completed': true};
+          });
+        }
+
+        // Update streak/XP via local engine; then reflect streak in UI
+        await HabitEngine.applyLocalTick(
+          habitId: id,
+          onApplied: (newStreak, newXp) {
+            if (!mounted) return;
+            setState(() {
+              final i = todayItems.indexWhere((x) => x['id'] == id);
+              if (i != -1) {
+                final base = Map<String, dynamic>.from(todayItems[i]);
+                todayItems[i] = {...base, 'streak': newStreak, 'completed': true};
+              }
+            });
+          },
+        );
+
+        // Fire-and-forget server analytics
+        apiClient.tickHabit(id, idempotencyKey: '${id}_${formatDate(DateTime.now())}');
       }
 
-      await prefs.setInt(streakKey, currentStreak);
-
-      if (mounted) {
-        setState(() {
-          final idx = allItems.indexWhere((i) => i['id'] == itemId);
-          if (idx != -1) {
-            final base = Map<String, dynamic>.from(allItems[idx]);
-            allItems[idx] = {...base, 'completed': nowDone, 'streak': currentStreak};
-          }
-        });
-      }
-
-      apiClient.tickHabit(itemId, idempotencyKey: '${itemId}_${formatDate(date)}');
       HapticFeedback.selectionClick();
     } catch (e) {
-      print('❌ Error toggling completion: $e');
+      // soft-fail
     }
   }
 
-  Future<Map<String, bool>> _getWeekCompletionData(String habitId, List<DateTime> dates) async {
-    final prefs = await SharedPreferences.getInstance();
-    final completion = <String, bool>{};
-    for (final date in dates) {
-      final key = 'done:$habitId:${formatDate(date)}';
-      completion[formatDate(date)] = prefs.getBool(key) ?? false;
-    }
-    return completion;
-  }
+  // ---------- UI ----------
 
-  Future<void> _saveItem(Map<String, dynamic> data) async {
-    if (data['name'].toString().trim().isEmpty) return;
-    try {
-      if (isEditing && data['id'] != null) {
-        await habitService.updateHabit(data['id'], data);
-        Toast.show(context, '✅ Updated!');
-        _closeModal();
-        await _loadData();
-      } else {
-        if (data['type'] == 'task') {
-          await habitService.createTask(data);
-        } else {
-          await habitService.createHabit(data);
-        }
-        _closeModal();
-        await _loadData();
-        Toast.show(context, '✅ Created!');
-      }
-    } catch (e) {
-      print('❌ Error saving: $e');
-      Toast.show(context, 'Failed to save');
-    }
-  }
-
-  Future<void> _deleteItem(String id) async {
-    try {
-      await habitService.deleteHabit(id);
-      await _loadData();
-      HapticFeedback.heavyImpact();
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('✅ Deleted'), duration: Duration(seconds: 1)));
-    } catch (e) {
-      print('❌ Delete error: $e');
-    }
-  }
-
-  // --- UI ---
-
-  Color _getColorForItem(dynamic item) {
-    final colorName = item['color'] ?? 'emerald';
-    return colorOptions.firstWhere((c) => c['name'] == colorName, orElse: () => colorOptions[0])['color'];
-  }
-
-  Widget _buildTopBar() => Container(
-        padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
-        child: Row(
-          children: [
-            const Text('Daily Orders',
-                style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
-            const Spacer(),
-            IconButton(
-              onPressed: () => Toast.show(context, 'Settings coming soon'),
-              icon: const Icon(Icons.settings, color: Colors.white70),
-            ),
-          ],
-        ),
-      );
-
-  Widget _buildWeekStrip() {
+  Widget _weekStrip() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Column(
@@ -256,13 +183,16 @@ class _NewHomeScreenState extends State<NewHomeScreen> with TickerProviderStateM
               onPressed: () => setState(() => selectedDate = selectedDate.subtract(const Duration(days: 7))),
               icon: const Icon(Icons.chevron_left, color: Colors.white70),
             ),
-            Text('${_monthName(selectedDate.month)} ${selectedDate.year}',
-                style: const TextStyle(color: Colors.white70, fontSize: 16)),
+            Text(
+              '${_monthName(selectedDate.month)} ${selectedDate.year}',
+              style: const TextStyle(color: Colors.white70, fontSize: 16, fontWeight: FontWeight.w600),
+            ),
             IconButton(
               onPressed: () => setState(() => selectedDate = selectedDate.add(const Duration(days: 7))),
               icon: const Icon(Icons.chevron_right, color: Colors.white70),
             ),
           ]),
+          const SizedBox(height: 8),
           Row(
             children: weekDates.map((date) {
               final isSelected = formatDate(date) == formatDate(selectedDate);
@@ -271,7 +201,7 @@ class _NewHomeScreenState extends State<NewHomeScreen> with TickerProviderStateM
                   onTap: () => setState(() => selectedDate = date),
                   child: Container(
                     margin: const EdgeInsets.symmetric(horizontal: 2),
-                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
                     decoration: BoxDecoration(
                       color: isSelected ? const Color(0xFF10B981) : const Color(0xFF121816),
                       borderRadius: BorderRadius.circular(16),
@@ -281,15 +211,22 @@ class _NewHomeScreenState extends State<NewHomeScreen> with TickerProviderStateM
                     ),
                     child: Column(
                       children: [
-                        Text(_dayAbbr(date.weekday),
-                            style: TextStyle(
-                                color: isSelected ? Colors.black : Colors.white70, fontSize: 12)),
+                        Text(
+                          _dayAbbr(date.weekday),
+                          style: TextStyle(
+                            color: isSelected ? Colors.black : Colors.white70,
+                            fontSize: 12,
+                          ),
+                        ),
                         const SizedBox(height: 2),
-                        Text('${date.day}',
-                            style: TextStyle(
-                                color: isSelected ? Colors.black : Colors.white,
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold)),
+                        Text(
+                          '${date.day}',
+                          style: TextStyle(
+                            color: isSelected ? Colors.black : Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -297,188 +234,461 @@ class _NewHomeScreenState extends State<NewHomeScreen> with TickerProviderStateM
               );
             }).toList(),
           ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              _buildFilterTab('habits', 'Habits'),
-              const SizedBox(width: 8),
-              _buildFilterTab('tasks', 'Tasks'),
-              const SizedBox(width: 8),
-              _buildFilterTab('bad', 'Bad Habits'),
-            ],
-          ),
         ],
       ),
     );
   }
 
-  Widget _buildFilterTab(String key, String label) {
-    final isSelected = filterTab == key;
-    return Expanded(
-      child: GestureDetector(
-        onTap: () => setState(() => filterTab = key),
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 12),
-          decoration: BoxDecoration(
-            color: isSelected ? const Color(0xFF10B981) : const Color(0xFF121816),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: isSelected ? const Color(0xFF34D399) : Colors.white.withOpacity(0.1),
-            ),
-          ),
-          child: Text(label,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                  color: isSelected ? Colors.black : Colors.white70,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600)),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildItemCard(dynamic item) {
-    final itemColor = _getColorForItem(item);
-    final itemType = item['type'] ?? 'habit';
-    final streak = item['streak'] ?? 0;
+  Widget _heroCard() {
+    final stats = briefData['stats'] as Map<String, dynamic>? ?? {};
+    final totalXP = (stats['totalXP'] ?? 0) as int;
+    final longest = (stats['longestStreak'] ?? 0) as int;
 
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      padding: const EdgeInsets.all(16),
+      margin: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: const Color(0xFF121816),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withOpacity(0.1)),
+        gradient: const LinearGradient(
+          colors: [Color(0xFF0F201A), Color(0xFF12251E), Color(0xFF0F201A)],
+          begin: Alignment.centerLeft,
+          end: Alignment.centerRight,
+        ),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: const Color(0xFF10B981).withOpacity(0.4)),
+        boxShadow: [
+          BoxShadow(color: const Color(0xFF10B981).withOpacity(0.1), blurRadius: 20, offset: const Offset(0, 8)),
+        ],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
         children: [
-          Row(children: [
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('DrillOS Status',
+                  style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 6),
+              Text('Longest streak $longest days',
+                  style: const TextStyle(color: Colors.white70, fontSize: 14)),
+              const SizedBox(height: 16),
+              Container(
+                height: 12,
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.4),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: AnimatedBuilder(
+                    animation: _progressController,
+                    builder: (_, __) => LinearProgressIndicator(
+                      value: _progressController.value * 0.65,
+                      backgroundColor: Colors.transparent,
+                      valueColor: const AlwaysStoppedAnimation(Color(0xFF10B981)),
+                    ),
+                  ),
+                ),
+              ),
+            ]),
+          ),
+          Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+            Text(
+              '$totalXP XP',
+              style: const TextStyle(color: Colors.white, fontSize: 36, fontWeight: FontWeight.w900),
+            ),
+            const SizedBox(height: 8),
             Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(color: itemColor, borderRadius: BorderRadius.circular(8)),
-              child: Icon(
-                itemType == 'habit'
-                    ? Icons.local_fire_department
-                    : itemType == 'task'
-                        ? Icons.check_box
-                        : Icons.close,
-                color: Colors.black,
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF59E0B).withOpacity(0.2),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.local_fire_department, color: Color(0xFFF59E0B), size: 16),
+                  SizedBox(width: 4),
+                  Text('Keep the streak', style: TextStyle(color: Color(0xFFF59E0B), fontSize: 12)),
+                ],
               ),
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(item['name'] ?? item['title'] ?? 'Untitled',
-                  style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600)),
-            ),
-            IconButton(
-              onPressed: () => _openEditModal(item),
-              icon: const Icon(Icons.settings, color: Colors.white70, size: 20),
-            ),
-          ]),
-          const SizedBox(height: 12),
-          FutureBuilder<Map<String, bool>>(
-            future: _getWeekCompletionData(item['id'].toString(), weekDates),
-            builder: (context, snapshot) {
-              final data = snapshot.data ?? {};
-              return Row(
-                children: weekDates.map((date) {
-                  final dateKey = formatDate(date);
-                  final isDone = data[dateKey] ?? false;
-                  final schedule = HabitSchedule.fromJson((item['schedule'] as Map?)?.cast<String, dynamic>());
-                  final isScheduled = schedule.isActiveOn(date);
-                  return Expanded(
-                    child: GestureDetector(
-                      onTap: isScheduled ? () => _toggleCompletion(item['id'].toString(), date) : null,
-                      child: Container(
-                        margin: const EdgeInsets.symmetric(horizontal: 2),
-                        height: 36,
-                        decoration: BoxDecoration(
-                          color: isDone ? const Color(0xFF10B981) : Colors.transparent,
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(
-                            color: isDone
-                                ? const Color(0xFF10B981)
-                                : isScheduled
-                                    ? Colors.white.withOpacity(0.2)
-                                    : Colors.transparent,
-                            width: 2,
-                          ),
-                        ),
-                        child: Center(
-                          child: isScheduled
-                              ? Text('${date.day}',
-                                  style: TextStyle(
-                                      color: isDone ? Colors.black : Colors.white,
-                                      fontWeight: FontWeight.w600,
-                                      fontSize: 12))
-                              : const Icon(Icons.remove, size: 12, color: Colors.white24),
-                        ),
-                      ),
-                    ),
-                  );
-                }).toList(),
-              );
-            },
-          ),
-          const SizedBox(height: 8),
-          Row(children: [
-            const Icon(Icons.local_fire_department, color: Color(0xFFF59E0B), size: 16),
-            const SizedBox(width: 4),
-            Text('${streak}d', style: const TextStyle(color: Colors.white70, fontSize: 14)),
           ]),
         ],
       ),
     );
   }
 
-  String _monthName(int m) => [
-        '', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-        'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+  Widget _nudgeCard() {
+    if (currentNudge == null || currentNudge!['nudge'] == null) return const SizedBox.shrink();
+
+    final message = currentNudge!['nudge'] as String;
+    final mentorName = currentNudge!['mentor']?.toString() ?? 'Drill Sergeant';
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [const Color(0xFF10B981).withOpacity(0.12), const Color(0xFF34D399).withOpacity(0.06)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFF34D399).withOpacity(0.3)),
+        boxShadow: [
+          BoxShadow(color: const Color(0xFF10B981).withOpacity(0.1), blurRadius: 20, offset: const Offset(0, 8)),
+        ],
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: const Color(0xFF10B981).withOpacity(0.2),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(Icons.military_tech_rounded, color: Color(0xFF10B981), size: 20),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(mentorName,
+                style: const TextStyle(color: Color(0xFF34D399), fontSize: 14, fontWeight: FontWeight.w600)),
+          ),
+          if (currentNudge?['voice']?['url'] is String &&
+              (currentNudge!['voice']['url'] as String).isNotEmpty)
+            IconButton(
+              icon: const Icon(Icons.volume_up, color: Colors.white70),
+              onPressed: () async {
+                try {
+                  await tts.playFromUrl(currentNudge!['voice']['url'].toString());
+                } catch (_) {}
+              },
+            ),
+        ]),
+        const SizedBox(height: 12),
+        Text(
+          message,
+          style: const TextStyle(color: Colors.white, fontSize: 16, height: 1.4),
+        ),
+      ]),
+    );
+  }
+
+  String _missionSummary() {
+    final completed = todayItems.where((i) => i['completed'] == true).length;
+    if (todayItems.isEmpty) return 'No missions for today 🎉';
+    return '$completed / ${todayItems.length} complete';
+  }
+
+  Widget _focusCards() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Column(children: [
+        // Focus
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: const Color(0xFF121816),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.white.withOpacity(0.1)),
+          ),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: const [
+              Text('Today\'s Focus',
+                  style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w600)),
+              Spacer(),
+              Icon(Icons.emoji_events, color: Color(0xFF10B981), size: 20),
+            ]),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [const Color(0xFF10B981).withOpacity(0.2), const Color(0xFF34D399).withOpacity(0.1)],
+                ),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                'Start with the highest-intensity mission for ${_dayName(selectedDate.weekday)}.',
+                style: const TextStyle(color: Colors.white, fontSize: 14),
+              ),
+            ),
+          ]),
+        ),
+        const SizedBox(height: 16),
+
+        // Missions
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: const Color(0xFF121816),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.white.withOpacity(0.1)),
+          ),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: const [
+              Text('Today\'s Missions',
+                  style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w600)),
+              Spacer(),
+              Icon(Icons.check_box, color: Color(0xFFF59E0B), size: 20),
+            ]),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [const Color(0xFFF59E0B).withOpacity(0.2), const Color(0xFFFBBF24).withOpacity(0.1)],
+                ),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(_missionSummary(), style: const TextStyle(color: Colors.white, fontSize: 14)),
+            ),
+          ]),
+        ),
+      ]),
+    );
+  }
+
+  Widget _todayItemsSection() {
+    if (todayItems.isEmpty) {
+      return Container(
+        margin: const EdgeInsets.symmetric(horizontal: 16),
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: const Color(0xFF121816),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.white.withOpacity(0.1)),
+        ),
+        child: const Center(
+          child: Text(
+            'No habits for today. Create one in the Habits tab!',
+            style: TextStyle(color: Colors.white70, fontSize: 16),
+            textAlign: TextAlign.center,
+          ),
+        ),
+      );
+    }
+
+    final habits = todayItems.where((i) => (i['type'] ?? 'habit') == 'habit').toList();
+    final tasks = todayItems.where((i) => i['type'] == 'task').toList();
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        if (habits.isNotEmpty) ...[
+          const Text('Today\'s Habits',
+              style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 12),
+          ...habits.map(_todayItemCard),
+          const SizedBox(height: 20),
+        ],
+        if (tasks.isNotEmpty) ...[
+          const Text('Today\'s Tasks',
+              style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 12),
+          ...tasks.map(_todayItemCard),
+        ],
+      ]),
+    );
+  }
+
+  Widget _todayItemCard(Map<String, dynamic> item) {
+    final isCompleted = item['completed'] == true;
+    final name = item['name'] ?? item['title'] ?? 'Habit';
+    final streak = (item['streak'] ?? 0) as int;
+    final color = _colorForItem(item);
+    final neon = _neonForItem(item);
+    final hasReminder = item['reminderEnabled'] == true;
+    final reminderTime = item['reminderTime'];
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [color.withOpacity(0.2), color.withOpacity(0.1), const Color(0xFF121816)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: neon.withOpacity(0.6), width: 1.5),
+        boxShadow: [
+          BoxShadow(color: neon.withOpacity(0.25), blurRadius: 8, offset: const Offset(0, 2)),
+        ],
+      ),
+      child: Row(children: [
+        // Icon
+        Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            color: isCompleted ? neon : color,
+            borderRadius: BorderRadius.circular(8),
+            boxShadow: [BoxShadow(color: (isCompleted ? neon : color).withOpacity(0.4), blurRadius: 6)],
+          ),
+          child: Icon(isCompleted ? Icons.check : Icons.local_fire_department, color: Colors.black, size: 20),
+        ),
+        const SizedBox(width: 12),
+
+        // Text
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(
+              name,
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                decoration: isCompleted ? TextDecoration.lineThrough : null,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+            const SizedBox(height: 4),
+            Row(children: [
+              Icon(Icons.local_fire_department, color: neon, size: 14),
+              const SizedBox(width: 4),
+              Text('$streak day streak', style: TextStyle(color: neon.withOpacity(0.85), fontSize: 12)),
+              if (hasReminder && reminderTime != null) ...[
+                const SizedBox(width: 12),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: neon.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: neon.withOpacity(0.6)),
+                  ),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(Icons.alarm, color: neon, size: 12),
+                    const SizedBox(width: 4),
+                    Text(reminderTime.toString(),
+                        style: TextStyle(color: neon, fontSize: 11, fontWeight: FontWeight.w600)),
+                  ]),
+                ),
+              ],
+            ]),
+          ]),
+        ),
+
+        // Complete
+        GestureDetector(
+          onTap: () => _toggleTodayItemCompletion(item),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: isCompleted ? neon : color.withOpacity(0.3),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: neon.withOpacity(0.8)),
+              boxShadow: [BoxShadow(color: neon.withOpacity(0.3), blurRadius: 4)],
+            ),
+            child: Text(
+              isCompleted ? 'Done' : 'Complete',
+              style: TextStyle(
+                color: isCompleted ? Colors.black : Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ),
+      ]),
+    );
+  }
+
+  String _monthName(int m) => const [
+        '', 'January', 'February', 'March', 'April', 'May', 'June',
+        'July', 'August', 'September', 'October', 'November', 'December'
       ][m];
-  String _dayAbbr(int d) => ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][d - 1];
+
+  String _dayAbbr(int d) => const ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][d];
+
+  String _dayName(int d) =>
+      const ['', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][d];
 
   @override
   Widget build(BuildContext context) {
-    if (isLoading) {
+    if (isLoading && briefData.isEmpty) {
       return const Scaffold(
         backgroundColor: Color(0xFF0B0F0E),
         body: Center(child: CircularProgressIndicator(color: Color(0xFF10B981))),
       );
     }
 
+    final stats = briefData['stats'] as Map<String, dynamic>? ?? {};
     return Scaffold(
       backgroundColor: const Color(0xFF0B0F0E),
-      body: Stack(children: [
-        CustomScrollView(
+      body: RefreshIndicator(
+        onRefresh: _loadData,
+        child: CustomScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
           slivers: [
-            SliverToBoxAdapter(child: _buildTopBar()),
-            SliverToBoxAdapter(child: _buildWeekStrip()),
-            const SliverToBoxAdapter(child: SizedBox(height: 24)),
-            SliverList(
-              delegate: SliverChildBuilderDelegate(
-                (context, i) => _buildItemCard(filteredItems[i]),
-                childCount: filteredItems.length,
-              ),
+            SliverAppBar(
+              backgroundColor: const Color(0xFF0B0F0E),
+              elevation: 0,
+              floating: true,
+              title: Row(children: [
+                const Icon(Icons.auto_awesome, color: Color(0xFF10B981), size: 24),
+                const SizedBox(width: 8),
+                ShaderMask(
+                  shaderCallback: (r) => const LinearGradient(
+                    colors: [Color(0xFF10B981), Color(0xFFF59E0B)],
+                  ).createShader(r),
+                  child: const Text(
+                    'Daily Orders',
+                    style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900, color: Colors.white),
+                  ),
+                ),
+              ]),
+              actions: [
+                IconButton(
+                  onPressed: () => Toast.show(context, 'Settings coming soon'),
+                  icon: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Icon(Icons.settings, color: Colors.white, size: 20),
+                  ),
+                ),
+                const SizedBox(width: 16),
+              ],
             ),
-            const SliverToBoxAdapter(child: SizedBox(height: 120)),
+
+            SliverList(
+              delegate: SliverChildListDelegate([
+                _weekStrip(),
+                const SizedBox(height: 16),
+
+                // Live stats HUD
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: XpHud(
+                    totalXP: (stats['totalXP'] ?? 0) as int,
+                    longestStreak: (stats['longestStreak'] ?? 0) as int,
+                    completedToday: (stats['completedToday'] ?? 0) as int,
+                    totalHabits: (stats['totalHabits'] ?? 0) as int,
+                  ),
+                ),
+                const SizedBox(height: 24),
+
+                _heroCard(),
+                const SizedBox(height: 24),
+
+                if (currentNudge != null && currentNudge!['nudge'] != null) ...[
+                  _nudgeCard(),
+                  const SizedBox(height: 24),
+                ],
+
+                _focusCards(),
+                const SizedBox(height: 24),
+
+                _todayItemsSection(),
+                const SizedBox(height: 120),
+              ]),
+            ),
           ],
         ),
-      ]),
+      ),
     );
-  }
-
-  void _openEditModal(dynamic item) {
-    setState(() {
-      formData = {...item};
-      isEditing = true;
-      showCreateModal = true;
-    });
-    _modalController.forward();
-  }
-
-  void _closeModal() {
-    _modalController.reverse().then((_) => setState(() => showCreateModal = false));
   }
 }
