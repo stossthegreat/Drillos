@@ -186,8 +186,9 @@ class _NewHabitsScreenState extends State<NewHabitsScreen> with TickerProviderSt
             setState(() {
               final index = allItems.indexWhere((item) => item['id'] == itemId);
               if (index != -1) {
+                final base = Map<String, dynamic>.from(allItems[index] as Map);
                 allItems[index] = {
-                  ...allItems[index],
+                  ...base,
                   'streak': newStreak,
                 };
               }
@@ -625,8 +626,10 @@ class _NewHabitsScreenState extends State<NewHabitsScreen> with TickerProviderSt
                   final isCompleted = completionData[dateKey] ?? false;
                   
                   // ✅ PHASE 2: Check if habit is actually scheduled for this date
+                  print('📅 Calendar checking: ${item['title']}, date=${date.weekday}, schedule=${item['schedule']}');
                   final schedule = HabitSchedule.fromJson((item['schedule'] as Map?)?.cast<String, dynamic>());
                   final isScheduled = schedule.isActiveOn(date);
+                  print('📅 isScheduled=$isScheduled for date ${date.day}');
                   
                   return Expanded(
                     child: GestureDetector(
