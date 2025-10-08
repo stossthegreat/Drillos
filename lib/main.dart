@@ -29,6 +29,7 @@ Future<void> main() async {
 
   // Alarms: init only (no auto exact scheduling that can throw)
   try {
+    await localStorage.cleanupInvalidHabits();
     await alarmService.init();
     await alarmService.requestPermissions();
   } catch (_) {}
