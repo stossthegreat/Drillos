@@ -1,3 +1,5 @@
+// ✅ App-level build.gradle.kts — clean, stable
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -41,15 +43,6 @@ android {
 
     kotlinOptions {
         jvmTarget = "17"
-    }
-
-    lint {
-        checkReleaseBuilds = false
-    }
-
-    packaging {
-        resources.excludes.add("META-INF/LICENSE*")
-        resources.excludes.add("META-INF/NOTICE*")
     }
 }
 
