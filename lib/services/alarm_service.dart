@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest.dart' as tzdata;
 
+/// 🔔 Alarm Service (Flutter Local Notifications v18 compatible)
 class AlarmService {
   static final AlarmService _instance = AlarmService._internal();
   factory AlarmService() => _instance;
@@ -22,19 +22,25 @@ class AlarmService {
 
     await _plugin.initialize(initSettings);
     _initialized = true;
+    debugPrint('✅ AlarmService initialized');
   }
 
+  /// Request notification permission (Android 13+ safe)
   Future<void> requestPermissions() async {
     try {
-      await _plugin
-          .resolvePlatformSpecificImplementation<
-              AndroidFlutterLocalNotificationsPlugin>()
-          ?.requestPermission();
+      final androidPlugin = _plugin.resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>();
+
+      if (androidPlugin != null) {
+        await androidPlugin.requestNotificationsPermission();
+        debugPrint('✅ Notification permission requested');
+      }
     } catch (e) {
-      debugPrint('⚠️ Alarm permission request failed: $e');
+      debugPrint('⚠️ Permission request failed: $e');
     }
   }
 
+  /// Schedule an alarm notification
   Future<void> scheduleAlarm({
     required String habitId,
     required String habitName,
@@ -70,7 +76,6 @@ class AlarmService {
         mentorMessage,
         next,
         const NotificationDetails(android: androidDetails),
-        androidAllowWhileIdle: true,
         uiLocalNotificationDateInterpretation:
             UILocalNotificationDateInterpretation.absoluteTime,
         matchDateTimeComponents: DateTimeComponents.time,
@@ -86,14 +91,16 @@ class AlarmService {
   Future<void> cancelAlarm(String habitId) async {
     try {
       await _plugin.cancel(habitId.hashCode);
+      debugPrint('🗑️ Alarm canceled for $habitId');
     } catch (e) {
-      debugPrint('⚠️ Cancel failed for $habitId: $e');
+      debugPrint('⚠️ Cancel failed: $e');
     }
   }
 
   Future<void> cancelAll() async {
     try {
       await _plugin.cancelAll();
+      debugPrint('🧹 All alarms canceled');
     } catch (e) {
       debugPrint('⚠️ Cancel all failed: $e');
     }
