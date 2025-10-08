@@ -1,13 +1,17 @@
-buildscript {
+// Top-level build file for DrillOS (Kotlin DSL)
+
+pluginManagement {
     repositories {
         google()
         mavenCentral()
+        gradlePluginPortal()
     }
-    dependencies {
-        classpath("com.android.tools.build:gradle:8.7.2")
-        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.24")
-        // ✅ DO NOT add dev.flutter.flutter-gradle-plugin here
-    }
+}
+
+plugins {
+    id("com.android.application") version "8.7.2" apply false
+    id("org.jetbrains.kotlin.android") version "1.9.24" apply false
+    id("dev.flutter.flutter-gradle-plugin") version "1.0.0" apply false
 }
 
 allprojects {
