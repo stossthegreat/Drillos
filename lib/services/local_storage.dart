@@ -19,7 +19,6 @@ class LocalStorage {
 
   // ========== HABITS ==========
 
-  // Simple static helpers (requested interface)
   static Future<void> saveHabits(List<Map<String, dynamic>> habits) async {
     final storage = LocalStorage();
     await storage.saveAllHabits(habits);
@@ -30,7 +29,6 @@ class LocalStorage {
     return await storage.getAllHabits();
   }
 
-  /// Get all habits from local storage
   Future<List<Map<String, dynamic>>> getAllHabits() async {
     await init();
     final habitsJson = _prefs.getString('habits') ?? '[]';
@@ -38,27 +36,22 @@ class LocalStorage {
     return decoded.map((h) => Map<String, dynamic>.from(h)).toList();
   }
 
-  /// Save all habits to local storage
   Future<void> saveAllHabits(List<Map<String, dynamic>> habits) async {
     await init();
     await _prefs.setString('habits', jsonEncode(habits));
   }
 
-  /// Add or update a single habit
   Future<void> saveHabit(Map<String, dynamic> habit) async {
     final habits = await getAllHabits();
     final index = habits.indexWhere((h) => h['id'] == habit['id']);
-    
     if (index >= 0) {
       habits[index] = habit;
     } else {
       habits.add(habit);
     }
-    
     await saveAllHabits(habits);
   }
 
-  /// Delete a habit
   Future<void> deleteHabit(String habitId) async {
     final habits = await getAllHabits();
     habits.removeWhere((h) => h['id'] == habitId);
@@ -67,14 +60,12 @@ class LocalStorage {
 
   // ========== COMPLETION TRACKING ==========
 
-  /// Mark habit as completed for a specific date
   Future<void> markCompleted(String habitId, DateTime date) async {
     await init();
     final key = 'done:$habitId:${_ymd(date)}';
     await _prefs.setBool(key, true);
   }
 
-  /// Check if habit was completed on a specific date
   Future<bool> isCompletedOn(String habitId, DateTime date) async {
     await init();
     final key = 'done:$habitId:${_ymd(date)}';
@@ -83,19 +74,16 @@ class LocalStorage {
 
   // ========== STREAKS ==========
 
-  /// Get current streak for a habit
   Future<int> getStreak(String habitId) async {
     await init();
     return _prefs.getInt('streak:$habitId') ?? 0;
   }
 
-  /// Set streak for a habit
   Future<void> setStreak(String habitId, int streak) async {
     await init();
     await _prefs.setInt('streak:$habitId', streak);
   }
 
-  /// Get last completion date for a habit
   Future<DateTime?> getLastCompletionDate(String habitId) async {
     await init();
     final dateStr = _prefs.getString('lastComplete:$habitId');
@@ -103,7 +91,6 @@ class LocalStorage {
     return DateTime.tryParse(dateStr);
   }
 
-  /// Set last completion date for a habit
   Future<void> setLastCompletionDate(String habitId, DateTime date) async {
     await init();
     await _prefs.setString('lastComplete:$habitId', date.toIso8601String());
@@ -111,13 +98,11 @@ class LocalStorage {
 
   // ========== XP ==========
 
-  /// Get total XP
   Future<int> getTotalXP() async {
     await init();
     return _prefs.getInt('xp:total') ?? 0;
   }
 
-  /// Add XP
   Future<int> addXP(int amount) async {
     await init();
     final current = await getTotalXP();
@@ -126,13 +111,11 @@ class LocalStorage {
     return newTotal;
   }
 
-  /// Get XP for a specific habit
   Future<int> getHabitXP(String habitId) async {
     await init();
     return _prefs.getInt('xp:$habitId') ?? 0;
   }
 
-  /// Add XP to a specific habit
   Future<void> addHabitXP(String habitId, int amount) async {
     await init();
     final current = await getHabitXP(habitId);
@@ -141,34 +124,28 @@ class LocalStorage {
 
   // ========== OVERALL STATS ==========
 
-  /// Get overall streak (longest current streak across all habits)
   Future<int> getOverallStreak() async {
     final habits = await getAllHabits();
     int maxStreak = 0;
-    
     for (final habit in habits) {
       final streak = await getStreak(habit['id']);
       if (streak > maxStreak) maxStreak = streak;
     }
-    
     return maxStreak;
   }
 
   // ========== ALARMS ==========
 
-  /// Get alarm time for a habit
   Future<String?> getAlarmTime(String habitId) async {
     await init();
     return _prefs.getString('alarm:$habitId');
   }
 
-  /// Set alarm time for a habit
   Future<void> setAlarmTime(String habitId, String time) async {
     await init();
     await _prefs.setString('alarm:$habitId', time);
   }
 
-  /// Remove alarm for a habit
   Future<void> removeAlarm(String habitId) async {
     await init();
     await _prefs.remove('alarm:$habitId');
@@ -176,7 +153,6 @@ class LocalStorage {
 
   // ========== SYNC ==========
 
-  /// Get last sync timestamp
   Future<DateTime?> getLastSyncTime() async {
     await init();
     final timestamp = _prefs.getInt('lastSync');
@@ -184,7 +160,6 @@ class LocalStorage {
     return DateTime.fromMillisecondsSinceEpoch(timestamp);
   }
 
-  /// Set last sync timestamp
   Future<void> setLastSyncTime(DateTime time) async {
     await init();
     await _prefs.setInt('lastSync', time.millisecondsSinceEpoch);
@@ -192,14 +167,33 @@ class LocalStorage {
 
   // ========== HELPERS ==========
 
-  String _ymd(DateTime d) => '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+  String _ymd(DateTime d) =>
+      '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
-  /// Clear all data (for testing/reset)
   Future<void> clearAll() async {
     await init();
     await _prefs.clear();
   }
+
+  // ========== CLEANUP FIX ==========
+
+  /// 🧹 Remove broken or old ghost habits with no valid ID or type
+  Future<void> cleanupInvalidHabits() async {
+    await init();
+    final all = await getAllHabits();
+    final cleaned = all.where((h) {
+      final id = h['id'];
+      final type = h['type'];
+      return id != null &&
+          id.toString().trim().isNotEmpty &&
+          (type == 'habit' || type == 'task' || type == 'bad');
+    }).toList();
+
+    if (cleaned.length != all.length) {
+      await saveAllHabits(cleaned);
+      print('🧹 Cleaned ${all.length - cleaned.length} invalid habits/tasks');
+    }
+  }
 }
 
 final localStorage = LocalStorage();
-
