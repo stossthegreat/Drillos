@@ -4,7 +4,7 @@ import '../design/glass.dart';
 import '../design/tokens.dart';
 import '../design/feedback.dart';
 import '../audio/tts_provider.dart';
-import '../services/local_storage.dart';
+import '../services/local_storage.dart' as ls1;
 import '../logic/habit_engine.dart';
 
 class StreaksScreen extends StatefulWidget {
@@ -85,12 +85,12 @@ class _StreaksScreenState extends State<StreaksScreen>
   Future<void> _loadStreaks() async {
     setState(() => loading = true);
     try {
-      final allHabits = await localStorage.getAllHabits();
+      final allHabits = await ls1.localStorage.getAllHabits();
       int total = 0;
       final catList = <CategoryStreak>[];
 
       for (final h in allHabits) {
-        final streak = await localStorage.getStreak(h['id']);
+        final streak = await ls1.localStorage.getStreak(h['id']);
         total += streak;
         final name = (h['name'] ?? h['title'] ?? 'Habit').toString();
         catList.add(CategoryStreak(

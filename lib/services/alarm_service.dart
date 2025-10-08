@@ -2,6 +2,7 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
+import 'dart:convert';
 import 'package:android_alarm_manager_plus/android_alarm_manager_plus.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -183,7 +184,6 @@ final alarmService = AlarmService();
 Future<void> alarmManagerCallback(int id) async {
   // Ensure bindings and plugin registrant are available in background isolate
   WidgetsFlutterBinding.ensureInitialized();
-  DartPluginRegistrant.ensureInitialized();
 
   final FlutterLocalNotificationsPlugin plugin = FlutterLocalNotificationsPlugin();
 
@@ -231,11 +231,8 @@ Future<void> alarmManagerCallback(int id) async {
 }
 
 Map<String, dynamic> _tryDecodeJson(String raw) {
-  // Minimal JSON decode without importing dart:convert to keep callback light
-  // However, importing is fine; prefer correctness
   try {
-    // ignore: avoid_dynamic_calls
-    return (const JsonDecoder()).convert(raw) as Map<String, dynamic>;
+    return jsonDecode(raw) as Map<String, dynamic>;
   } catch (_) {
     return <String, dynamic>{};
   }

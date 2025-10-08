@@ -4,14 +4,18 @@ plugins {
     id "dev.flutter.flutter-gradle-plugin"
 }
 
+flutter {
+    source '../..'
+}
+
 android {
     namespace "com.example.drillos"
-    compileSdkVersion 36
+    compileSdkVersion 34
 
     defaultConfig {
         applicationId "com.example.drillos"
-        minSdkVersion 23
-        targetSdkVersion 36
+        minSdkVersion flutter.minSdkVersion
+        targetSdkVersion 34
         versionCode 1
         versionName "1.0.0"
         multiDexEnabled true
@@ -38,6 +42,7 @@ android {
 
     kotlinOptions {
         jvmTarget = "17"
+        freeCompilerArgs += ["-Xjvm-default=all"]
     }
 }
 

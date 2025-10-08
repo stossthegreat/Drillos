@@ -1,134 +1,52 @@
-import 'dart:convert';
-import 'package:shared_preferences/shared_preferences.dart';
+import '../services/local_storage.dart' as ls1;
 
-/// 🗄️ Local Storage Service (100% stable, HabitEngine-compatible)
-class LocalStorage {
-  static final LocalStorage _instance = LocalStorage._internal();
-  factory LocalStorage() => _instance;
-  LocalStorage._internal();
+/// HabitEngine – small helper for streak logic used by UI screens.
+class HabitEngine {
+  static DateTime _startOfDay(DateTime d) => DateTime(d.year, d.month, d.day);
 
-  late SharedPreferences _prefs;
-  bool _initialized = false;
+  /// Resets streaks for habits that were missed yesterday and not yet completed today.
+  static Future<void> checkStreakResets() async {
+    final items = await ls1.localStorage.getAllHabits();
+    final now = DateTime.now();
+    final today = _startOfDay(now);
+    final yesterday = today.subtract(const Duration(days: 1));
 
-  Future<void> init() async {
-    if (!_initialized) {
-      _prefs = await SharedPreferences.getInstance();
-      _initialized = true;
+    for (final raw in items) {
+      final type = (raw['type'] ?? 'habit').toString();
+      if (type != 'habit') continue;
+      final id = raw['id'].toString();
+      final doneYesterday = await ls1.localStorage.isCompletedOn(id, yesterday);
+      final doneToday = await ls1.localStorage.isCompletedOn(id, today);
+      if (!doneYesterday && !doneToday) {
+        final current = await ls1.localStorage.getStreak(id);
+        if (current != 0) {
+          await ls1.localStorage.setStreak(id, 0);
+        }
+      }
     }
   }
 
-  // ===================== STATIC HELPERS =====================
+  /// Applies a local completion tick for today and updates streak + XP.
+  static Future<void> applyLocalTick({
+    required String habitId,
+    void Function(int newStreak, int newXp)? onApplied,
+  }) async {
+    final now = DateTime.now();
+    final today = _startOfDay(now);
+    final yesterday = today.subtract(const Duration(days: 1));
 
-  static Future<void> saveHabits(List<Map<String, dynamic>> habits) async {
-    final s = LocalStorage();
-    await s.saveAllHabits(habits);
-  }
+    await ls1.localStorage.markCompleted(habitId, today);
 
-  static Future<List<Map<String, dynamic>>> loadHabits() async {
-    final s = LocalStorage();
-    return await s.getAllHabits();
-  }
+    final prevStreak = await ls1.localStorage.getStreak(habitId);
+    final wasYesterdayDone = await ls1.localStorage.isCompletedOn(habitId, yesterday);
+    final newStreak = wasYesterdayDone ? prevStreak + 1 : 1;
+    await ls1.localStorage.setStreak(habitId, newStreak);
 
-  // ===================== HABITS =====================
+    // Award flat XP for now; adjust as needed
+    final newXpTotal = await ls1.localStorage.addXP(10);
 
-  Future<List<Map<String, dynamic>>> getAllHabits() async {
-    await init();
-    final data = _prefs.getString('habits') ?? '[]';
-    final List decoded = jsonDecode(data);
-    return decoded.map((h) => Map<String, dynamic>.from(h)).toList();
-  }
-
-  Future<void> saveAllHabits(List<Map<String, dynamic>> habits) async {
-    await init();
-    await _prefs.setString('habits', jsonEncode(habits));
-  }
-
-  Future<void> saveHabit(Map<String, dynamic> habit) async {
-    final all = await getAllHabits();
-    final idx = all.indexWhere((h) => h['id'] == habit['id']);
-    if (idx >= 0) {
-      all[idx] = habit;
-    } else {
-      all.add(habit);
+    if (onApplied != null) {
+      onApplied(newStreak, newXpTotal);
     }
-    await saveAllHabits(all);
   }
-
-  Future<void> deleteHabit(String id) async {
-    final all = await getAllHabits();
-    all.removeWhere((h) => h['id'] == id);
-    await saveAllHabits(all);
-  }
-
-  // ===================== COMPLETION =====================
-
-  Future<void> markCompleted(String id, DateTime date) async {
-    await init();
-    final key = 'done:$id:${_ymd(date)}';
-    await _prefs.setBool(key, true);
-  }
-
-  Future<bool> isCompletedOn(String id, DateTime date) async {
-    await init();
-    final key = 'done:$id:${_ymd(date)}';
-    return _prefs.getBool(key) ?? false;
-  }
-
-  // ===================== STREAKS =====================
-
-  Future<int> getStreak(String id) async {
-    await init();
-    return _prefs.getInt('streak:$id') ?? 0;
-  }
-
-  Future<void> setStreak(String id, int val) async {
-    await init();
-    await _prefs.setInt('streak:$id', val);
-  }
-
-  Future<DateTime?> getLastCompletionDate(String id) async {
-    await init();
-    final s = _prefs.getString('lastComplete:$id');
-    if (s == null) return null;
-    return DateTime.tryParse(s);
-  }
-
-  Future<void> setLastCompletionDate(String id, DateTime date) async {
-    await init();
-    await _prefs.setString('lastComplete:$id', date.toIso8601String());
-  }
-
-  // ===================== XP =====================
-
-  Future<int> getTotalXP() async {
-    await init();
-    return _prefs.getInt('xp:total') ?? 0;
-  }
-
-  Future<int> addXP(int amount) async {
-    await init();
-    final c = await getTotalXP();
-    final newVal = c + amount;
-    await _prefs.setInt('xp:total', newVal);
-    return newVal;
-  }
-
-  Future<int> getHabitXP(String id) async {
-    await init();
-    return _prefs.getInt('xp:$id') ?? 0;
-  }
-
-  Future<void> addHabitXP(String id, int amount) async {
-    await init();
-    final c = await getHabitXP(id);
-    await _prefs.setInt('xp:$id', c + amount);
-  }
-
-  // ===================== HELPERS =====================
-
-  String _ymd(DateTime d) =>
-      '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 }
-
-/// Global singleton instance
-final localStorage = LocalStorage();
