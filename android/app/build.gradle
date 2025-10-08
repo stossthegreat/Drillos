@@ -6,12 +6,12 @@ plugins {
 
 android {
     namespace "com.example.drillos"
-    compileSdkVersion 34
+    compileSdkVersion 36
 
     defaultConfig {
         applicationId "com.example.drillos"
         minSdkVersion 23
-        targetSdkVersion 34
+        targetSdkVersion 36
         versionCode 1
         versionName "1.0.0"
         multiDexEnabled true
@@ -21,6 +21,7 @@ android {
         release {
             minifyEnabled true
             shrinkResources true
+            // Keep debug signing only if no release keystore configured
             signingConfig signingConfigs.debug
             proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
         }
@@ -43,4 +44,5 @@ android {
 dependencies {
     implementation "androidx.multidex:multidex:2.0.1"
     coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.0.4"
+    implementation "androidx.work:work-runtime-ktx:2.9.1"
 }
