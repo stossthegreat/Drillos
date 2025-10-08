@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../services/local_storage.dart';
 import '../services/habit_service.dart';
 import '../services/api_client.dart';
 import '../logic/habit_engine.dart';
+import '../services/local_storage.dart' as ls1;
 import '../utils/schedule.dart';
 import '../design/feedback.dart';
 
@@ -23,7 +23,7 @@ class _NewHomeScreenState extends State<NewHomeScreen>
   List<Map<String, dynamic>> habits = [];
   List<Map<String, dynamic>> tasks = [];
 
-  final _local = localStorage;
+  final _local = ls1.localStorage;
   final _habits = habitService;
   final _api = apiClient;
 

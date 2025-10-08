@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../services/local_storage.dart';
+import '../services/local_storage.dart' as ls1;
 import '../services/habit_service.dart';
 import '../services/alarm_service.dart';
 import '../design/feedback.dart';
@@ -90,7 +90,7 @@ class _NewHabitsScreenState extends State<NewHabitsScreen>
       await HabitEngine.checkStreakResets();
 
       // 🔥 LOCAL ONLY to avoid “ghost” API tasks coming back
-      final items = await localStorage.getAllHabits();
+      final items = await ls1.localStorage.getAllHabits();
 
       // Normalize types & enrich current streak/completed for today
       final enriched = <Map<String, dynamic>>[];
@@ -103,8 +103,8 @@ class _NewHabitsScreenState extends State<NewHabitsScreen>
         if (t == 'tasks') it['type'] = 'task';
 
         if (it['type'] == 'habit') {
-          final streak = await localStorage.getStreak(it['id'].toString());
-          final done = await localStorage.isCompletedOn(
+          final streak = await ls1.localStorage.getStreak(it['id'].toString());
+          final done = await ls1.localStorage.isCompletedOn(
               it['id'].toString(), DateTime.now());
           it['streak'] = streak;
           it['completed'] = done;
