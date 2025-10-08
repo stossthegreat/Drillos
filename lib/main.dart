@@ -15,11 +15,12 @@ import 'screens/anti_habit_detail_screen.dart';
 
 import 'services/api_client.dart';
 import 'services/alarm_service.dart';
+import 'services/local_storage.dart'; // ✅ this was missing
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // API base
+  // 🌐 API base setup
   const apiUrl = String.fromEnvironment('API_BASE_URL', defaultValue: '');
   if (apiUrl.isEmpty) {
     apiClient.setBaseUrl('https://drillos-production.up.railway.app');
@@ -27,12 +28,14 @@ Future<void> main() async {
     apiClient.setBaseUrl(apiUrl);
   }
 
-  // Alarms: init only (no auto exact scheduling that can throw)
+  // 🔔 Init alarm + clean habits
   try {
-    await localStorage.cleanupInvalidHabits();
+    await localStorage.cleanupInvalidHabits(); // ✅ fixes ghost tasks
     await alarmService.init();
     await alarmService.requestPermissions();
-  } catch (_) {}
+  } catch (e) {
+    print('⚠️ Alarm init failed: $e');
+  }
 
   runApp(const DrillSergeantApp());
 }
@@ -113,7 +116,10 @@ class DrillSergeantApp extends StatelessWidget {
             const Scaffold(
               backgroundColor: Colors.black,
               body: Center(
-                child: Text('⚠️ Failed to load route', style: TextStyle(color: Colors.white)),
+                child: Text(
+                  '⚠️ Failed to load route',
+                  style: TextStyle(color: Colors.white),
+                ),
               ),
             ),
       ),
