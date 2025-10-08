@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/services.dart'; // <-- REQUIRED for PlatformException
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest.dart' as tzdata;
@@ -18,11 +19,9 @@ class AlarmService {
   Future<void> init() async {
     if (_initialized) return;
 
-    // Timezone set-up (safe even if called multiple times)
     tzdata.initializeTimeZones();
 
     const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
-
     const iosInit = DarwinInitializationSettings(
       requestAlertPermission: true,
       requestBadgePermission: true,
@@ -38,11 +37,8 @@ class AlarmService {
     _initialized = true;
   }
 
-  /// Ask for notification permissions and (on Android 13+) post-notification permission.
-  /// Also checks whether exact alarms are allowed on this device.
   Future<bool> requestPermissions() async {
     await init();
-
     bool granted = true;
 
     // iOS permissions
@@ -61,12 +57,11 @@ class AlarmService {
       final androidImpl = _plugin.resolvePlatformSpecificImplementation<
           AndroidFlutterLocalNotificationsPlugin>();
 
-      // Android 13 (Tiramisu) runtime permission for posting notifications
+      // Android 13+ runtime notification permission
       try {
         await androidImpl?.requestNotificationsPermission();
       } catch (_) {}
 
-      // Are notifications enabled at all?
       final enabled = await androidImpl?.areNotificationsEnabled() ?? true;
       granted = enabled && granted;
     }
@@ -74,8 +69,8 @@ class AlarmService {
     return granted;
   }
 
-  /// Schedule a weekly alarm at [time] (HH:mm) on the given [daysOfWeek] (1=Mon..7=Sun).
-  /// Uses exact alarms if permitted; otherwise falls back to inexact to avoid crashes.
+  /// Schedule a weekly alarm at [time] (HH:mm) on [daysOfWeek] (1=Mon..7=Sun).
+  /// Falls back to inexact alarms automatically if exact alarms aren't permitted.
   Future<void> scheduleAlarm({
     required String habitId,
     required String habitName,
@@ -85,7 +80,6 @@ class AlarmService {
   }) async {
     await init();
 
-    // Parse HH:mm safely
     final parts = time.split(':');
     final hour = int.tryParse(parts.elementAt(0)) ?? 8;
     final minute = int.tryParse(parts.elementAt(1)) ?? 0;
@@ -114,7 +108,6 @@ class AlarmService {
       iOS: iosDetails,
     );
 
-    // Decide schedule mode (exact vs inexact)
     AndroidScheduleMode scheduleMode = AndroidScheduleMode.inexactAllowWhileIdle;
     if (Platform.isAndroid) {
       final androidImpl = _plugin.resolvePlatformSpecificImplementation<
@@ -143,7 +136,6 @@ class AlarmService {
           matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime,
         );
       } on PlatformException catch (e) {
-        // Fallback to inexact if exact is not permitted
         if (e.code == 'exact_alarms_not_permitted') {
           await _plugin.zonedSchedule(
             id,
@@ -178,8 +170,6 @@ class AlarmService {
     return _plugin.pendingNotificationRequests();
   }
 
-  // ---------- Helpers ----------
-
   int _notificationId(String habitId, int dow) {
     final base = habitId.hashCode & 0x7fffffff;
     return (base ^ dow) % 0x7fffffff;
@@ -189,8 +179,6 @@ class AlarmService {
     final now = tz.TZDateTime.now(tz.local);
     var scheduled =
         tz.TZDateTime(tz.local, now.year, now.month, now.day, hour, minute);
-
-    // Move forward until weekday matches and time is in the future
     while (scheduled.weekday != dow || !scheduled.isAfter(now)) {
       scheduled = scheduled.add(const Duration(days: 1));
     }
