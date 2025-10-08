@@ -1,6 +1,3 @@
-// Gradle configuration for DrillOS Android app module.
-// Supports Kotlin 1.9.24, Gradle 8+, Flutter Local Notifications & AlarmManager.
-
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -29,7 +26,7 @@ android {
                 "proguard-rules.pro",
                 "proguard-flutter.txt"
             )
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("debug") // change to release keystore later
         }
         getByName("debug") {
             isMinifyEnabled = false
