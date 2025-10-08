@@ -1,0 +1,16 @@
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+def flutterSdkPath = System.getenv("FLUTTER_ROOT")
+if (flutterSdkPath == null || flutterSdkPath.isEmpty()) {
+    throw new GradleException("❌ FLUTTER_ROOT environment variable not set. Please set it to your Flutter SDK path.")
+}
+
+includeBuild("${flutterSdkPath}/packages/flutter_tools/gradle")
+
+include(":app")
