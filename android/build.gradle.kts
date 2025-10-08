@@ -1,4 +1,4 @@
-// Top-level build file for DrillOS (Kotlin DSL)
+// ✅ Top-level build.gradle.kts (Flutter-safe version)
 
 pluginManagement {
     repositories {
@@ -9,9 +9,9 @@ pluginManagement {
 }
 
 plugins {
+    // Do NOT redeclare Flutter plugin version here — Flutter injects it automatically
     id("com.android.application") version "8.7.2" apply false
     id("org.jetbrains.kotlin.android") version "1.9.24" apply false
-    id("dev.flutter.flutter-gradle-plugin") version "1.0.0" apply false
 }
 
 allprojects {
