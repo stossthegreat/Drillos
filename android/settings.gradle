@@ -1,9 +1,17 @@
 pluginManagement {
-    includeBuild("${System.getenv("FLUTTER_ROOT") ?: "../../"}packages/flutter_tools/gradle")
+    // Use the FLUTTER_ROOT path if set, otherwise fall back to relative location.
+    def flutterSdkPath = System.getenv("FLUTTER_ROOT")
+    if (flutterSdkPath == null || flutterSdkPath.isEmpty()) {
+        flutterSdkPath = "../../"
+    }
+
+    includeBuild("${flutterSdkPath}/packages/flutter_tools/gradle")
+
     repositories {
         google()
         mavenCentral()
         gradlePluginPortal()
     }
 }
+
 include(":app")
