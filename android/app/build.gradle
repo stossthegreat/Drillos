@@ -1,28 +1,20 @@
 plugins {
-    id 'com.android.application'
-    id 'org.jetbrains.kotlin.android'
-    id 'dev.flutter.flutter-gradle-plugin'
+    id "com.android.application"
+    id "org.jetbrains.kotlin.android"
+    id "dev.flutter.flutter-gradle-plugin"
 }
 
 android {
     namespace "com.example.drillos"
-    compileSdk 34
+    compileSdk 36
 
     defaultConfig {
         applicationId "com.example.drillos"
         minSdk 23
-        targetSdk 34
+        targetSdk 36
         versionCode 1
         versionName "1.0.0"
         multiDexEnabled true
-    }
-
-    buildTypes {
-        release {
-            signingConfig signingConfigs.debug
-            minifyEnabled false
-            shrinkResources false
-        }
     }
 
     compileOptions {
@@ -30,16 +22,29 @@ android {
         targetCompatibility JavaVersion.VERSION_17
         coreLibraryDesugaringEnabled true
     }
+
     kotlinOptions {
         jvmTarget = "17"
     }
+
+    buildTypes {
+        release {
+            signingConfig signingConfigs.debug
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+        debug {
+            minifyEnabled false
+        }
+    }
+}
+
+flutter {
+    source '../..'
 }
 
 dependencies {
     implementation "androidx.multidex:multidex:2.0.1"
     coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.0.4"
-}
-
-flutter {
-    source '../..'
 }
