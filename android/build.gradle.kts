@@ -1,17 +1,13 @@
-// ✅ Top-level build.gradle.kts (Flutter-safe version)
-
-pluginManagement {
+// Top-level build.gradle.kts – clean, stable Flutter setup
+buildscript {
     repositories {
         google()
         mavenCentral()
-        gradlePluginPortal()
     }
-}
-
-plugins {
-    // Do NOT redeclare Flutter plugin version here — Flutter injects it automatically
-    id("com.android.application") version "8.7.2" apply false
-    id("org.jetbrains.kotlin.android") version "1.9.24" apply false
+    dependencies {
+        classpath("com.android.tools.build:gradle:8.7.2")
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.24")
+    }
 }
 
 allprojects {
