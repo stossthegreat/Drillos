@@ -1,9 +1,8 @@
 import 'dart:io';
-import 'package:flutter/services.dart'; // <-- REQUIRED for PlatformException
+import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest.dart' as tzdata;
-
 import '../services/local_storage.dart';
 
 class AlarmService {
@@ -13,12 +12,11 @@ class AlarmService {
 
   final FlutterLocalNotificationsPlugin _plugin =
       FlutterLocalNotificationsPlugin();
-
   bool _initialized = false;
+  bool _canUseExact = false;
 
   Future<void> init() async {
     if (_initialized) return;
-
     tzdata.initializeTimeZones();
 
     const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
@@ -27,50 +25,54 @@ class AlarmService {
       requestBadgePermission: true,
       requestSoundPermission: true,
     );
-
-    const initSettings = InitializationSettings(
-      android: androidInit,
-      iOS: iosInit,
-    );
+    const initSettings =
+        InitializationSettings(android: androidInit, iOS: iosInit);
 
     await _plugin.initialize(initSettings);
+    await _checkExactSupport();
     _initialized = true;
+  }
+
+  Future<void> _checkExactSupport() async {
+    if (!Platform.isAndroid) return;
+    try {
+      final androidImpl = _plugin.resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>();
+      _canUseExact =
+          (await androidImpl?.canScheduleExactNotifications()) ?? false;
+    } catch (_) {
+      _canUseExact = false;
+    }
   }
 
   Future<bool> requestPermissions() async {
     await init();
     bool granted = true;
 
-    // iOS permissions
+    // iOS
     final ios = _plugin.resolvePlatformSpecificImplementation<
         IOSFlutterLocalNotificationsPlugin>();
     if (ios != null) {
-      final result = await ios.requestPermissions(
-        alert: true,
-        badge: true,
-        sound: true,
-      );
-      granted = (result ?? true) && granted;
+      final result =
+          await ios.requestPermissions(alert: true, badge: true, sound: true);
+      granted = (result ?? true);
     }
 
+    // Android
     if (Platform.isAndroid) {
       final androidImpl = _plugin.resolvePlatformSpecificImplementation<
           AndroidFlutterLocalNotificationsPlugin>();
-
-      // Android 13+ runtime notification permission
       try {
         await androidImpl?.requestNotificationsPermission();
       } catch (_) {}
-
       final enabled = await androidImpl?.areNotificationsEnabled() ?? true;
-      granted = enabled && granted;
+      granted = enabled;
+      await _checkExactSupport();
     }
 
     return granted;
   }
 
-  /// Schedule a weekly alarm at [time] (HH:mm) on [daysOfWeek] (1=Mon..7=Sun).
-  /// Falls back to inexact alarms automatically if exact alarms aren't permitted.
   Future<void> scheduleAlarm({
     required String habitId,
     required String habitName,
@@ -81,9 +83,8 @@ class AlarmService {
     await init();
 
     final parts = time.split(':');
-    final hour = int.tryParse(parts.elementAt(0)) ?? 8;
-    final minute = int.tryParse(parts.elementAt(1)) ?? 0;
-
+    final hour = int.tryParse(parts[0]) ?? 8;
+    final minute = int.tryParse(parts[1]) ?? 0;
     final message =
         mentorMessage ?? '⚡ Time to complete your habit: $habitName';
 
@@ -103,55 +104,27 @@ class AlarmService {
       presentSound: true,
     );
 
-    const details = NotificationDetails(
-      android: androidDetails,
-      iOS: iosDetails,
-    );
-
-    AndroidScheduleMode scheduleMode = AndroidScheduleMode.inexactAllowWhileIdle;
-    if (Platform.isAndroid) {
-      final androidImpl = _plugin.resolvePlatformSpecificImplementation<
-          AndroidFlutterLocalNotificationsPlugin>();
-      final canExact =
-          (await androidImpl?.canScheduleExactNotifications()) ?? false;
-      if (canExact) {
-        scheduleMode = AndroidScheduleMode.exactAllowWhileIdle;
-      }
-    }
+    final details =
+        const NotificationDetails(android: androidDetails, iOS: iosDetails);
 
     for (final dow in daysOfWeek) {
       final id = _notificationId(habitId, dow);
       final scheduled = _nextInstanceOf(dow, hour, minute);
+      final mode = _canUseExact
+          ? AndroidScheduleMode.exactAllowWhileIdle
+          : AndroidScheduleMode.inexactAllowWhileIdle;
 
-      try {
-        await _plugin.zonedSchedule(
-          id,
-          '🔥 DrillOS Reminder',
-          message,
-          scheduled,
-          details,
-          androidScheduleMode: scheduleMode,
-          uiLocalNotificationDateInterpretation:
-              UILocalNotificationDateInterpretation.absoluteTime,
-          matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime,
-        );
-      } on PlatformException catch (e) {
-        if (e.code == 'exact_alarms_not_permitted') {
-          await _plugin.zonedSchedule(
-            id,
-            '🔥 DrillOS Reminder',
-            message,
-            scheduled,
-            details,
-            androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
-            uiLocalNotificationDateInterpretation:
-                UILocalNotificationDateInterpretation.absoluteTime,
-            matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime,
-          );
-        } else {
-          rethrow;
-        }
-      }
+      await _plugin.zonedSchedule(
+        id,
+        '🔥 DrillOS Reminder',
+        message,
+        scheduled,
+        details,
+        androidScheduleMode: mode,
+        uiLocalNotificationDateInterpretation:
+            UILocalNotificationDateInterpretation.absoluteTime,
+        matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime,
+      );
     }
 
     await localStorage.setAlarmTime(habitId, time);
@@ -163,11 +136,6 @@ class AlarmService {
       await _plugin.cancel(_notificationId(habitId, dow));
     }
     await localStorage.removeAlarm(habitId);
-  }
-
-  Future<List<PendingNotificationRequest>> getPending() async {
-    await init();
-    return _plugin.pendingNotificationRequests();
   }
 
   int _notificationId(String habitId, int dow) {
