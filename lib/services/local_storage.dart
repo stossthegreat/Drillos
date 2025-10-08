@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// 🗄️ Local Storage Service - All habit data lives here
+/// 🗄️ Local Storage Service - handles all habits, streaks, and local data.
 class LocalStorage {
   static final LocalStorage _instance = LocalStorage._internal();
   factory LocalStorage() => _instance;
@@ -17,22 +17,35 @@ class LocalStorage {
     }
   }
 
+  // 🧹 Clean invalid / ghost habits left from older builds
+  Future<void> cleanupInvalidHabits() async {
+    await init();
+    final habitsJson = _prefs.getString('habits');
+    if (habitsJson == null) return;
+
+    try {
+      final List<dynamic> decoded = jsonDecode(habitsJson);
+      final valid = decoded
+          .whereType<Map>()
+          .where((h) => (h['id'] != null && h['name'] != null))
+          .toList();
+
+      if (valid.length != decoded.length) {
+        await _prefs.setString('habits', jsonEncode(valid));
+        print('🧹 Cleaned up ${decoded.length - valid.length} invalid habits');
+      }
+    } catch (e) {
+      print('⚠️ Habit cleanup failed: $e — resetting store');
+      await _prefs.remove('habits');
+    }
+  }
+
   // ========== HABITS ==========
-
-  static Future<void> saveHabits(List<Map<String, dynamic>> habits) async {
-    final storage = LocalStorage();
-    await storage.saveAllHabits(habits);
-  }
-
-  static Future<List<Map<String, dynamic>>> loadHabits() async {
-    final storage = LocalStorage();
-    return await storage.getAllHabits();
-  }
 
   Future<List<Map<String, dynamic>>> getAllHabits() async {
     await init();
     final habitsJson = _prefs.getString('habits') ?? '[]';
-    final List<dynamic> decoded = jsonDecode(habitsJson);
+    final List decoded = jsonDecode(habitsJson);
     return decoded.map((h) => Map<String, dynamic>.from(h)).toList();
   }
 
@@ -43,9 +56,9 @@ class LocalStorage {
 
   Future<void> saveHabit(Map<String, dynamic> habit) async {
     final habits = await getAllHabits();
-    final index = habits.indexWhere((h) => h['id'] == habit['id']);
-    if (index >= 0) {
-      habits[index] = habit;
+    final idx = habits.indexWhere((h) => h['id'] == habit['id']);
+    if (idx >= 0) {
+      habits[idx] = habit;
     } else {
       habits.add(habit);
     }
@@ -58,45 +71,31 @@ class LocalStorage {
     await saveAllHabits(habits);
   }
 
-  // ========== COMPLETION TRACKING ==========
+  // ========== COMPLETION ==========
 
-  Future<void> markCompleted(String habitId, DateTime date) async {
+  Future<void> markCompleted(String id, DateTime date) async {
     await init();
-    final key = 'done:$habitId:${_ymd(date)}';
-    await _prefs.setBool(key, true);
+    await _prefs.setBool('done:$id:${_ymd(date)}', true);
   }
 
-  Future<bool> isCompletedOn(String habitId, DateTime date) async {
+  Future<bool> isCompletedOn(String id, DateTime date) async {
     await init();
-    final key = 'done:$habitId:${_ymd(date)}';
-    return _prefs.getBool(key) ?? false;
+    return _prefs.getBool('done:$id:${_ymd(date)}') ?? false;
   }
 
   // ========== STREAKS ==========
 
-  Future<int> getStreak(String habitId) async {
+  Future<int> getStreak(String id) async {
     await init();
-    return _prefs.getInt('streak:$habitId') ?? 0;
+    return _prefs.getInt('streak:$id') ?? 0;
   }
 
-  Future<void> setStreak(String habitId, int streak) async {
+  Future<void> setStreak(String id, int streak) async {
     await init();
-    await _prefs.setInt('streak:$habitId', streak);
+    await _prefs.setInt('streak:$id', streak);
   }
 
-  Future<DateTime?> getLastCompletionDate(String habitId) async {
-    await init();
-    final dateStr = _prefs.getString('lastComplete:$habitId');
-    if (dateStr == null) return null;
-    return DateTime.tryParse(dateStr);
-  }
-
-  Future<void> setLastCompletionDate(String habitId, DateTime date) async {
-    await init();
-    await _prefs.setString('lastComplete:$habitId', date.toIso8601String());
-  }
-
-  // ========== XP ==========
+  // ========== XP / STATS ==========
 
   Future<int> getTotalXP() async {
     await init();
@@ -105,64 +104,26 @@ class LocalStorage {
 
   Future<int> addXP(int amount) async {
     await init();
-    final current = await getTotalXP();
-    final newTotal = current + amount;
-    await _prefs.setInt('xp:total', newTotal);
-    return newTotal;
-  }
-
-  Future<int> getHabitXP(String habitId) async {
-    await init();
-    return _prefs.getInt('xp:$habitId') ?? 0;
-  }
-
-  Future<void> addHabitXP(String habitId, int amount) async {
-    await init();
-    final current = await getHabitXP(habitId);
-    await _prefs.setInt('xp:$habitId', current + amount);
-  }
-
-  // ========== OVERALL STATS ==========
-
-  Future<int> getOverallStreak() async {
-    final habits = await getAllHabits();
-    int maxStreak = 0;
-    for (final habit in habits) {
-      final streak = await getStreak(habit['id']);
-      if (streak > maxStreak) maxStreak = streak;
-    }
-    return maxStreak;
+    final total = await getTotalXP() + amount;
+    await _prefs.setInt('xp:total', total);
+    return total;
   }
 
   // ========== ALARMS ==========
 
-  Future<String?> getAlarmTime(String habitId) async {
+  Future<String?> getAlarmTime(String id) async {
     await init();
-    return _prefs.getString('alarm:$habitId');
+    return _prefs.getString('alarm:$id');
   }
 
-  Future<void> setAlarmTime(String habitId, String time) async {
+  Future<void> setAlarmTime(String id, String time) async {
     await init();
-    await _prefs.setString('alarm:$habitId', time);
+    await _prefs.setString('alarm:$id', time);
   }
 
-  Future<void> removeAlarm(String habitId) async {
+  Future<void> removeAlarm(String id) async {
     await init();
-    await _prefs.remove('alarm:$habitId');
-  }
-
-  // ========== SYNC ==========
-
-  Future<DateTime?> getLastSyncTime() async {
-    await init();
-    final timestamp = _prefs.getInt('lastSync');
-    if (timestamp == null) return null;
-    return DateTime.fromMillisecondsSinceEpoch(timestamp);
-  }
-
-  Future<void> setLastSyncTime(DateTime time) async {
-    await init();
-    await _prefs.setInt('lastSync', time.millisecondsSinceEpoch);
+    await _prefs.remove('alarm:$id');
   }
 
   // ========== HELPERS ==========
@@ -173,26 +134,6 @@ class LocalStorage {
   Future<void> clearAll() async {
     await init();
     await _prefs.clear();
-  }
-
-  // ========== CLEANUP FIX ==========
-
-  /// 🧹 Remove broken or old ghost habits with no valid ID or type
-  Future<void> cleanupInvalidHabits() async {
-    await init();
-    final all = await getAllHabits();
-    final cleaned = all.where((h) {
-      final id = h['id'];
-      final type = h['type'];
-      return id != null &&
-          id.toString().trim().isNotEmpty &&
-          (type == 'habit' || type == 'task' || type == 'bad');
-    }).toList();
-
-    if (cleaned.length != all.length) {
-      await saveAllHabits(cleaned);
-      print('🧹 Cleaned ${all.length - cleaned.length} invalid habits/tasks');
-    }
   }
 }
 
