@@ -26,7 +26,7 @@ android {
                 "proguard-rules.pro",
                 "proguard-flutter.txt"
             )
-            signingConfig = signingConfigs.getByName("debug") // change to release keystore later
+            signingConfig = signingConfigs.getByName("debug")
         }
         getByName("debug") {
             isMinifyEnabled = false
