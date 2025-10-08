@@ -120,24 +120,36 @@ class HabitService {
 
   // ---------- DELETE ----------
 
-  Future<void> deleteHabit(String id) async {
-    // ✅ legacy support — redirects to deleteItem
-    await deleteItem(id);
-  }
+  /// Kept for backward compatibility with screens calling `deleteHabit`.
+  Future<void> deleteHabit(String id) async => deleteItem(id);
 
+  /// Deletes local item + cancels alarms + tries both remote endpoints
+  /// when type is unknown (fixes “old tasks” that kept reappearing).
   Future<void> deleteItem(String id, {String? type}) async {
+    // local
     await _storage.deleteHabit(id);
-
     try {
       await _alarms.cancelAlarm(id);
     } catch (_) {}
 
-    final t = type ?? (await _findType(id));
+    // try to figure out type from local
+    String? t = type ?? await _findType(id);
+
+    // remote – try both if unknown
     try {
       if (t == 'task') {
         await _api.deleteTask(id);
-      } else {
+      } else if (t == 'habit') {
         await _api.deleteHabit(id);
+      } else {
+        // Unknown: attempt task first, then habit
+        try {
+          await _api.deleteTask(id);
+        } catch (_) {
+          try {
+            await _api.deleteHabit(id);
+          } catch (_) {}
+        }
       }
     } catch (_) {}
   }
@@ -255,7 +267,8 @@ class HabitService {
     if (schedule['everyN'] != null) {
       final everyN = schedule['everyN'] as int? ?? 2;
       final start = DateTime.parse(startDateStr ?? DateTime.now().toIso8601String());
-      final daysSince = d.difference(DateTime(start.year, start.month, start.day)).inDays;
+      final daysSince =
+          d.difference(DateTime(start.year, start.month, start.day)).inDays;
       return daysSince % everyN == 0;
     }
 
@@ -263,8 +276,9 @@ class HabitService {
     final daysOfWeek = <int>[];
     if (rawDays is List) {
       for (final day in rawDays) {
-        if (day is int && day >= 1 && day <= 7) daysOfWeek.add(day);
-        else if (day is String) {
+        if (day is int && day >= 1 && day <= 7) {
+          daysOfWeek.add(day);
+        } else if (day is String) {
           final parsed = int.tryParse(day);
           if (parsed != null && parsed >= 1 && parsed <= 7) daysOfWeek.add(parsed);
         } else if (day is num) {
@@ -281,8 +295,7 @@ class HabitService {
     try {
       final schedule = habit['schedule'] as Map<String, dynamic>?;
       final daysOfWeek = (schedule?['daysOfWeek'] as List?)
-              ?.map((e) =>
-                  e is int ? e : int.tryParse(e.toString()) ?? 1)
+              ?.map((e) => e is int ? e : int.tryParse(e.toString()) ?? 1)
               .toList() ??
           [1, 2, 3, 4, 5, 6, 7];
 
