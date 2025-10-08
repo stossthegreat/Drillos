@@ -43,10 +43,6 @@ android {
         jvmTarget = "17"
     }
 
-    lint {
-        checkReleaseBuilds = false
-    }
-
     packaging {
         resources.excludes.add("META-INF/LICENSE*")
         resources.excludes.add("META-INF/NOTICE*")
