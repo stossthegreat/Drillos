@@ -1,7 +1,10 @@
 // lib/services/alarm_service.dart
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
+import 'package:android_alarm_manager_plus/android_alarm_manager_plus.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:timezone/data/latest.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
 
@@ -82,45 +85,34 @@ class AlarmService {
     final hour = int.tryParse(parts.elementAt(0)) ?? 8;
     final minute = int.tryParse(parts.elementAt(1)) ?? 0;
 
-    final body = mentorMessage ?? '⏰ $habitName';
-
-    const android = AndroidNotificationDetails(
-      'habit_reminders',
-      'Habit Reminders',
-      channelDescription: 'Reminders for your daily habits',
-      importance: Importance.high,
-      priority: Priority.high,
-      playSound: true,
-      enableVibration: true,
-    );
-
-    const ios = DarwinNotificationDetails(
-      presentAlert: true,
-      presentBadge: true,
-      presentSound: true,
-    );
-
-    const details = NotificationDetails(android: android, iOS: ios);
+    final String body = mentorMessage ?? '⏰ $habitName';
 
     // Cancel existing for this habit first (safety)
     await cancelAlarm(habitId);
 
-    for (final dow in daysOfWeek) {
+    // Persist payloads for background callback to read
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+
+    for (final int dow in daysOfWeek) {
       if (dow < 1 || dow > 7) continue;
 
-      final id = _notificationId(habitId, dow);
-      final next = _nextInstanceOf(dow, hour, minute);
+      final int id = _notificationId(habitId, dow);
+      final DateTime next = _nextInstanceOfDateTime(dow, hour, minute);
 
-      await _plugin.zonedSchedule(
-        id,
-        'Alarm — $habitName',
-        body,
+      // Store payload for callback
+      await prefs.setString('alarm:payload:$id',
+          '{"title":"Alarm — $habitName","body":"${_escapeJson(body)}"}');
+
+      // Schedule exact alarm via AndroidAlarmManager
+      // Note: This will fire once at the next occurrence; UI can reschedule as needed.
+      await AndroidAlarmManager.oneShotAt(
         next,
-        details,
-        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle, // v18 OK
-        uiLocalNotificationDateInterpretation:
-            UILocalNotificationDateInterpretation.absoluteTime,
-        matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime,
+        id,
+        alarmManagerCallback,
+        exact: true,
+        wakeup: true,
+        rescheduleOnReboot: true,
+        allowWhileIdle: true,
       );
     }
   }
@@ -128,12 +120,15 @@ class AlarmService {
   Future<void> cancelAlarm(String habitId) async {
     await init();
     for (int dow = 1; dow <= 7; dow++) {
-      final id = _notificationId(habitId, dow);
+      final int id = _notificationId(habitId, dow);
       try {
+        // Cancel any scheduled alarm
+        await AndroidAlarmManager.cancel(id);
+      } catch (_) {}
+      try {
+        // Also cancel any pending local notification with same id
         await _plugin.cancel(id);
-      } catch (_) {
-        // ignore
-      }
+      } catch (_) {}
     }
   }
 
@@ -153,8 +148,15 @@ class AlarmService {
     final now = tz.TZDateTime.now(tz.local);
     tz.TZDateTime scheduled =
         tz.TZDateTime(tz.local, now.year, now.month, now.day, hour, minute);
+    while (scheduled.weekday != dow || !scheduled.isAfter(now)) {
+      scheduled = scheduled.add(const Duration(days: 1));
+    }
+    return scheduled;
+  }
 
-    // Move forward to correct weekday/time
+  DateTime _nextInstanceOfDateTime(int dow, int hour, int minute) {
+    final DateTime now = DateTime.now();
+    DateTime scheduled = DateTime(now.year, now.month, now.day, hour, minute);
     while (scheduled.weekday != dow || !scheduled.isAfter(now)) {
       scheduled = scheduled.add(const Duration(days: 1));
     }
@@ -174,3 +176,71 @@ class AlarmService {
 }
 
 final alarmService = AlarmService();
+
+// ===== AndroidAlarmManager background callback =====
+
+@pragma('vm:entry-point')
+Future<void> alarmManagerCallback(int id) async {
+  // Ensure bindings and plugin registrant are available in background isolate
+  WidgetsFlutterBinding.ensureInitialized();
+  DartPluginRegistrant.ensureInitialized();
+
+  final FlutterLocalNotificationsPlugin plugin = FlutterLocalNotificationsPlugin();
+
+  const InitializationSettings initSettings = InitializationSettings(
+    android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+    iOS: DarwinInitializationSettings(),
+  );
+
+  try {
+    await plugin.initialize(initSettings);
+  } catch (_) {}
+
+  final SharedPreferences prefs = await SharedPreferences.getInstance();
+  final String? raw = prefs.getString('alarm:payload:$id');
+
+  String title = 'Alarm';
+  String body = 'It\'s time!';
+  if (raw != null && raw.isNotEmpty) {
+    try {
+      final Map<String, dynamic> j = _tryDecodeJson(raw);
+      title = (j['title'] as String?) ?? title;
+      body = (j['body'] as String?) ?? body;
+    } catch (_) {}
+  }
+
+  const AndroidNotificationDetails android = AndroidNotificationDetails(
+    'habit_reminders',
+    'Habit Reminders',
+    channelDescription: 'Reminders for your daily habits',
+    importance: Importance.high,
+    priority: Priority.high,
+    playSound: true,
+    enableVibration: true,
+  );
+  const DarwinNotificationDetails ios = DarwinNotificationDetails(
+    presentAlert: true,
+    presentBadge: true,
+    presentSound: true,
+  );
+  const NotificationDetails details = NotificationDetails(android: android, iOS: ios);
+
+  try {
+    await plugin.show(id, title, body, details);
+  } catch (_) {}
+}
+
+Map<String, dynamic> _tryDecodeJson(String raw) {
+  // Minimal JSON decode without importing dart:convert to keep callback light
+  // However, importing is fine; prefer correctness
+  try {
+    // ignore: avoid_dynamic_calls
+    return (const JsonDecoder()).convert(raw) as Map<String, dynamic>;
+  } catch (_) {
+    return <String, dynamic>{};
+  }
+}
+
+String _escapeJson(String input) {
+  return input.replaceAll('\\', r'\\').replaceAll('"', r'\"').replaceAll('\n', r'\\n');
+}

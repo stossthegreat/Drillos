@@ -52,7 +52,8 @@
         <!-- ✅ android_alarm_manager_plus receiver -->
         <receiver
             android:name="dev.fluttercommunity.plus.androidalarmmanager.AlarmBroadcastReceiver"
-            android:exported="true" />
+            android:exported="true"
+            android:permission="android.permission.WAKE_LOCK" />
 
         <!-- ✅ Needed for reboot persistence -->
         <receiver

@@ -15,10 +15,16 @@ import 'screens/anti_habit_detail_screen.dart';
 
 import 'services/api_client.dart';
 import 'services/alarm_service.dart';
+import 'package:android_alarm_manager_plus/android_alarm_manager_plus.dart';
 import 'services/local_storage.dart'; // ✅ this was missing
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Initialize Android Alarm Manager for background alarms
+  try {
+    await AndroidAlarmManager.initialize();
+  } catch (_) {}
 
   // 🌐 API base setup
   const apiUrl = String.fromEnvironment('API_BASE_URL', defaultValue: '');
