@@ -1,120 +1,174 @@
-import 'dart:async';
-import 'package:flutter/material.dart';
+// lib/services/alarm_service.dart
+import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:android_alarm_manager_plus/android_alarm_manager_plus.dart';
-import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest.dart' as tzdata;
+import 'package:timezone/timezone.dart' as tz;
 
-/// 🔔 Real Alarm Service using android_alarm_manager_plus + flutter_local_notifications
 class AlarmService {
   static final AlarmService _instance = AlarmService._internal();
   factory AlarmService() => _instance;
   AlarmService._internal();
 
-  final FlutterLocalNotificationsPlugin _notifications =
+  final FlutterLocalNotificationsPlugin _plugin =
       FlutterLocalNotificationsPlugin();
 
   bool _initialized = false;
 
   Future<void> init() async {
     if (_initialized) return;
-    tzdata.initializeTimeZones();
 
-    const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
-    const initSettings = InitializationSettings(android: androidInit);
-    await _notifications.initialize(initSettings);
-
-    await AndroidAlarmManager.initialize();
-    _initialized = true;
-    debugPrint('✅ AlarmService initialized (real alarm mode)');
-  }
-
-  /// Requests POST_NOTIFICATIONS permission on Android 13+
-  Future<void> requestPermissions() async {
+    // Timezones
     try {
-      final androidPlugin = _notifications.resolvePlatformSpecificImplementation<
-          AndroidFlutterLocalNotificationsPlugin>();
-      await androidPlugin?.requestNotificationsPermission();
-    } catch (e) {
-      debugPrint('⚠️ Notification permission failed: $e');
+      tzdata.initializeTimeZones();
+      final String localName = DateTime.now().timeZoneName;
+      // Safe fallback – if timezone not resolvable, tz.local is still usable.
+      tz.setLocalLocation(tz.getLocation(_safeTz(localName)));
+    } catch (_) {
+      // ignore – keep tz.local default
     }
+
+    // Init (v18 API – NO requestPermission on Android here)
+    const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
+    const iosInit = DarwinInitializationSettings(
+      requestAlertPermission: true,
+      requestBadgePermission: true,
+      requestSoundPermission: true,
+    );
+
+    const initSettings = InitializationSettings(
+      android: androidInit,
+      iOS: iosInit,
+    );
+
+    await _plugin.initialize(initSettings);
+    _initialized = true;
   }
 
-  /// Schedule a true alarm
+  // On Android 13+ POST_NOTIFICATIONS permission is declared in Manifest.
+  // We **don’t** call any non-existent requestPermission() on Android (v18).
+  Future<bool> requestPermissions() async {
+    await init();
+
+    bool granted = true;
+
+    final ios =
+        _plugin.resolvePlatformSpecificImplementation<IOSFlutterLocalNotificationsPlugin>();
+    if (ios != null) {
+      final res = await ios.requestPermissions(
+        alert: true,
+        badge: true,
+        sound: true,
+      );
+      granted = (res ?? true) && granted;
+    }
+
+    // For Android we rely on Manifest + user prompt by system UI.
+    return granted;
+  }
+
+  /// Schedule a weekly alarm at [time] for each [daysOfWeek] (1=Mon..7=Sun)
   Future<void> scheduleAlarm({
     required String habitId,
     required String habitName,
     required String time,
-    required String mentorMessage,
+    List<int> daysOfWeek = const [1, 2, 3, 4, 5, 6, 7],
+    String? mentorMessage,
   }) async {
     await init();
 
+    // Defensive parse
     final parts = time.split(':');
-    final hour = int.parse(parts[0]);
-    final minute = int.parse(parts[1]);
+    final hour = int.tryParse(parts.elementAt(0)) ?? 8;
+    final minute = int.tryParse(parts.elementAt(1)) ?? 0;
 
-    final now = DateTime.now();
-    var next = DateTime(now.year, now.month, now.day, hour, minute);
-    if (next.isBefore(now)) next = next.add(const Duration(days: 1));
+    final body = mentorMessage ?? '⏰ $habitName';
 
-    // Register background alarm
-    await AndroidAlarmManager.oneShotAt(
-      next,
-      habitId.hashCode,
-      _alarmCallback,
-      alarmClock: true, // real OS-level alarm
-      allowWhileIdle: true,
-      wakeup: true,
-      rescheduleOnReboot: true,
-      params: {'habitName': habitName, 'mentorMessage': mentorMessage},
-    );
-
-    debugPrint('✅ Real alarm scheduled for $time ($habitName)');
-  }
-
-  /// The callback runs when the alarm fires (background-safe)
-  static Future<void> _alarmCallback(Map<String, dynamic> params) async {
-    final plugin = FlutterLocalNotificationsPlugin();
-    const androidDetails = AndroidNotificationDetails(
-      'habit_alarms',
-      'Habit Alarms',
-      channelDescription: 'Real alarm notifications',
-      importance: Importance.max,
+    const android = AndroidNotificationDetails(
+      'habit_reminders',
+      'Habit Reminders',
+      channelDescription: 'Reminders for your daily habits',
+      importance: Importance.high,
       priority: Priority.high,
       playSound: true,
       enableVibration: true,
-      fullScreenIntent: true, // wake up the screen
     );
 
-    final notificationDetails = const NotificationDetails(android: androidDetails);
-    await plugin.initialize(const InitializationSettings(
-        android: AndroidInitializationSettings('@mipmap/ic_launcher')));
-
-    final habitName = params['habitName'] ?? 'Habit Reminder';
-    final message = params['mentorMessage'] ?? 'Time to rise and conquer!';
-    await plugin.show(
-      DateTime.now().millisecondsSinceEpoch.remainder(100000),
-      habitName,
-      message,
-      notificationDetails,
+    const ios = DarwinNotificationDetails(
+      presentAlert: true,
+      presentBadge: true,
+      presentSound: true,
     );
-  }
 
-  Future<void> cancelAlarm(String habitId) async {
-    try {
-      await AndroidAlarmManager.cancel(habitId.hashCode);
-      debugPrint('🗑️ Alarm canceled for $habitId');
-    } catch (e) {
-      debugPrint('⚠️ Cancel failed: $e');
+    const details = NotificationDetails(android: android, iOS: ios);
+
+    // Cancel existing for this habit first (safety)
+    await cancelAlarm(habitId);
+
+    for (final dow in daysOfWeek) {
+      if (dow < 1 || dow > 7) continue;
+
+      final id = _notificationId(habitId, dow);
+      final next = _nextInstanceOf(dow, hour, minute);
+
+      await _plugin.zonedSchedule(
+        id,
+        'Alarm — $habitName',
+        body,
+        next,
+        details,
+        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle, // v18 OK
+        uiLocalNotificationDateInterpretation:
+            UILocalNotificationDateInterpretation.absoluteTime,
+        matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime,
+      );
     }
   }
 
-  Future<void> cancelAll() async {
-    try {
-      await _notifications.cancelAll();
-      debugPrint('🧹 All notifications cleared');
-    } catch (e) {
-      debugPrint('⚠️ Cancel all failed: $e');
+  Future<void> cancelAlarm(String habitId) async {
+    await init();
+    for (int dow = 1; dow <= 7; dow++) {
+      final id = _notificationId(habitId, dow);
+      try {
+        await _plugin.cancel(id);
+      } catch (_) {
+        // ignore
+      }
+    }
+  }
+
+  Future<List<PendingNotificationRequest>> getPending() async {
+    await init();
+    return _plugin.pendingNotificationRequests();
+  }
+
+  // ===== Helpers =====
+
+  int _notificationId(String habitId, int dow) {
+    final base = habitId.hashCode & 0x7fffffff;
+    return (base ^ dow) % 0x7fffffff;
+  }
+
+  tz.TZDateTime _nextInstanceOf(int dow, int hour, int minute) {
+    final now = tz.TZDateTime.now(tz.local);
+    tz.TZDateTime scheduled =
+        tz.TZDateTime(tz.local, now.year, now.month, now.day, hour, minute);
+
+    // Move forward to correct weekday/time
+    while (scheduled.weekday != dow || !scheduled.isAfter(now)) {
+      scheduled = scheduled.add(const Duration(days: 1));
+    }
+    return scheduled;
+  }
+
+  String _safeTz(String name) {
+    // Best-effort mapping for common device labels to TZ DB names
+    // (most devices already return a valid region name)
+    switch (name) {
+      case 'GMT':
+        return 'Etc/GMT';
+      default:
+        return tz.local.name; // fallback
     }
   }
 }
