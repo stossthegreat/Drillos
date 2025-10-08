@@ -1,8 +1,8 @@
 import 'dart:io';
-import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest.dart' as tzdata;
+
 import '../services/local_storage.dart';
 
 class AlarmService {
@@ -18,9 +18,11 @@ class AlarmService {
   Future<void> init() async {
     if (_initialized) return;
 
+    // Timezone set-up (safe even if called multiple times)
     tzdata.initializeTimeZones();
 
     const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
+
     const iosInit = DarwinInitializationSettings(
       requestAlertPermission: true,
       requestBadgePermission: true,
@@ -36,12 +38,14 @@ class AlarmService {
     _initialized = true;
   }
 
+  /// Ask for notification permissions and (on Android 13+) post-notification permission.
+  /// Also checks whether exact alarms are allowed on this device.
   Future<bool> requestPermissions() async {
     await init();
 
     bool granted = true;
 
-    // iOS
+    // iOS permissions
     final ios = _plugin.resolvePlatformSpecificImplementation<
         IOSFlutterLocalNotificationsPlugin>();
     if (ios != null) {
@@ -53,19 +57,25 @@ class AlarmService {
       granted = (result ?? true) && granted;
     }
 
-    // Android: notifications enabled?
     if (Platform.isAndroid) {
       final androidImpl = _plugin.resolvePlatformSpecificImplementation<
           AndroidFlutterLocalNotificationsPlugin>();
-      if (androidImpl != null) {
-        final res = await androidImpl.areNotificationsEnabled();
-        granted = (res ?? true) && granted;
-      }
+
+      // Android 13 (Tiramisu) runtime permission for posting notifications
+      try {
+        await androidImpl?.requestNotificationsPermission();
+      } catch (_) {}
+
+      // Are notifications enabled at all?
+      final enabled = await androidImpl?.areNotificationsEnabled() ?? true;
+      granted = enabled && granted;
     }
 
     return granted;
   }
 
+  /// Schedule a weekly alarm at [time] (HH:mm) on the given [daysOfWeek] (1=Mon..7=Sun).
+  /// Uses exact alarms if permitted; otherwise falls back to inexact to avoid crashes.
   Future<void> scheduleAlarm({
     required String habitId,
     required String habitName,
@@ -75,9 +85,11 @@ class AlarmService {
   }) async {
     await init();
 
+    // Parse HH:mm safely
     final parts = time.split(':');
-    final hour = int.tryParse(parts[0]) ?? 8;
-    final minute = int.tryParse(parts[1]) ?? 0;
+    final hour = int.tryParse(parts.elementAt(0)) ?? 8;
+    final minute = int.tryParse(parts.elementAt(1)) ?? 0;
+
     final message =
         mentorMessage ?? '⚡ Time to complete your habit: $habitName';
 
@@ -102,40 +114,51 @@ class AlarmService {
       iOS: iosDetails,
     );
 
+    // Decide schedule mode (exact vs inexact)
+    AndroidScheduleMode scheduleMode = AndroidScheduleMode.inexactAllowWhileIdle;
+    if (Platform.isAndroid) {
+      final androidImpl = _plugin.resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>();
+      final canExact =
+          (await androidImpl?.canScheduleExactNotifications()) ?? false;
+      if (canExact) {
+        scheduleMode = AndroidScheduleMode.exactAllowWhileIdle;
+      }
+    }
+
     for (final dow in daysOfWeek) {
       final id = _notificationId(habitId, dow);
-      final when = _nextInstanceOf(dow, hour, minute);
+      final scheduled = _nextInstanceOf(dow, hour, minute);
 
-      // Try EXACT first; if not permitted, retry INEXACT (no crash).
       try {
         await _plugin.zonedSchedule(
           id,
           '🔥 DrillOS Reminder',
           message,
-          when,
+          scheduled,
           details,
-          androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+          androidScheduleMode: scheduleMode,
           uiLocalNotificationDateInterpretation:
               UILocalNotificationDateInterpretation.absoluteTime,
           matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime,
         );
       } on PlatformException catch (e) {
-        final notAllowed = e.code == 'exact_alarms_not_permitted' ||
-            (e.message ?? '').toLowerCase().contains('exact alarms');
-        if (!notAllowed) rethrow;
-
-        // Fallback – schedule inexact
-        await _plugin.zonedSchedule(
-          id,
-          '🔥 DrillOS Reminder',
-          message,
-          when,
-          details,
-          androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
-          uiLocalNotificationDateInterpretation:
-              UILocalNotificationDateInterpretation.absoluteTime,
-          matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime,
-        );
+        // Fallback to inexact if exact is not permitted
+        if (e.code == 'exact_alarms_not_permitted') {
+          await _plugin.zonedSchedule(
+            id,
+            '🔥 DrillOS Reminder',
+            message,
+            scheduled,
+            details,
+            androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+            uiLocalNotificationDateInterpretation:
+                UILocalNotificationDateInterpretation.absoluteTime,
+            matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime,
+          );
+        } else {
+          rethrow;
+        }
       }
     }
 
@@ -145,11 +168,7 @@ class AlarmService {
   Future<void> cancelAlarm(String habitId) async {
     await init();
     for (int dow = 1; dow <= 7; dow++) {
-      try {
-        await _plugin.cancel(_notificationId(habitId, dow));
-      } catch (_) {
-        // ignore
-      }
+      await _plugin.cancel(_notificationId(habitId, dow));
     }
     await localStorage.removeAlarm(habitId);
   }
@@ -158,6 +177,8 @@ class AlarmService {
     await init();
     return _plugin.pendingNotificationRequests();
   }
+
+  // ---------- Helpers ----------
 
   int _notificationId(String habitId, int dow) {
     final base = habitId.hashCode & 0x7fffffff;
@@ -169,6 +190,7 @@ class AlarmService {
     var scheduled =
         tz.TZDateTime(tz.local, now.year, now.month, now.day, hour, minute);
 
+    // Move forward until weekday matches and time is in the future
     while (scheduled.weekday != dow || !scheduled.isAfter(now)) {
       scheduled = scheduled.add(const Duration(days: 1));
     }
