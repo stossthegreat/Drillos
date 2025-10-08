@@ -1,156 +1,102 @@
-import 'dart:io';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest.dart' as tzdata;
-import '../services/local_storage.dart';
 
 class AlarmService {
   static final AlarmService _instance = AlarmService._internal();
   factory AlarmService() => _instance;
   AlarmService._internal();
 
-  final FlutterLocalNotificationsPlugin _plugin =
-      FlutterLocalNotificationsPlugin();
+  final _plugin = FlutterLocalNotificationsPlugin();
   bool _initialized = false;
-  bool _canUseExact = false;
 
   Future<void> init() async {
     if (_initialized) return;
+
     tzdata.initializeTimeZones();
 
     const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
-    const iosInit = DarwinInitializationSettings(
-      requestAlertPermission: true,
-      requestBadgePermission: true,
-      requestSoundPermission: true,
-    );
-    const initSettings =
-        InitializationSettings(android: androidInit, iOS: iosInit);
+    const initSettings = InitializationSettings(android: androidInit);
 
     await _plugin.initialize(initSettings);
-    await _checkExactSupport();
     _initialized = true;
   }
 
-  Future<void> _checkExactSupport() async {
-    if (!Platform.isAndroid) return;
+  Future<void> requestPermissions() async {
     try {
-      final androidImpl = _plugin.resolvePlatformSpecificImplementation<
-          AndroidFlutterLocalNotificationsPlugin>();
-      _canUseExact =
-          (await androidImpl?.canScheduleExactNotifications()) ?? false;
-    } catch (_) {
-      _canUseExact = false;
+      await _plugin
+          .resolvePlatformSpecificImplementation<
+              AndroidFlutterLocalNotificationsPlugin>()
+          ?.requestPermission();
+    } catch (e) {
+      debugPrint('⚠️ Alarm permission request failed: $e');
     }
-  }
-
-  Future<bool> requestPermissions() async {
-    await init();
-    bool granted = true;
-
-    // iOS
-    final ios = _plugin.resolvePlatformSpecificImplementation<
-        IOSFlutterLocalNotificationsPlugin>();
-    if (ios != null) {
-      final result =
-          await ios.requestPermissions(alert: true, badge: true, sound: true);
-      granted = (result ?? true);
-    }
-
-    // Android
-    if (Platform.isAndroid) {
-      final androidImpl = _plugin.resolvePlatformSpecificImplementation<
-          AndroidFlutterLocalNotificationsPlugin>();
-      try {
-        await androidImpl?.requestNotificationsPermission();
-      } catch (_) {}
-      final enabled = await androidImpl?.areNotificationsEnabled() ?? true;
-      granted = enabled;
-      await _checkExactSupport();
-    }
-
-    return granted;
   }
 
   Future<void> scheduleAlarm({
     required String habitId,
     required String habitName,
     required String time,
-    List<int> daysOfWeek = const [1, 2, 3, 4, 5, 6, 7],
-    String? mentorMessage,
+    required List<int> daysOfWeek,
+    required String mentorMessage,
   }) async {
     await init();
 
-    final parts = time.split(':');
-    final hour = int.tryParse(parts[0]) ?? 8;
-    final minute = int.tryParse(parts[1]) ?? 0;
-    final message =
-        mentorMessage ?? '⚡ Time to complete your habit: $habitName';
+    try {
+      final parts = time.split(':');
+      final hour = int.parse(parts[0]);
+      final minute = int.parse(parts[1]);
 
-    const androidDetails = AndroidNotificationDetails(
-      'habit_reminders',
-      'Habit Reminders',
-      channelDescription: 'Reminders for your daily habits',
-      importance: Importance.high,
-      priority: Priority.high,
-      playSound: true,
-      enableVibration: true,
-    );
+      final now = tz.TZDateTime.now(tz.local);
+      var next = tz.TZDateTime(tz.local, now.year, now.month, now.day, hour, minute);
+      if (next.isBefore(now)) {
+        next = next.add(const Duration(days: 1));
+      }
 
-    const iosDetails = DarwinNotificationDetails(
-      presentAlert: true,
-      presentBadge: true,
-      presentSound: true,
-    );
-
-    final details =
-        const NotificationDetails(android: androidDetails, iOS: iosDetails);
-
-    for (final dow in daysOfWeek) {
-      final id = _notificationId(habitId, dow);
-      final scheduled = _nextInstanceOf(dow, hour, minute);
-      final mode = _canUseExact
-          ? AndroidScheduleMode.exactAllowWhileIdle
-          : AndroidScheduleMode.inexactAllowWhileIdle;
+      const androidDetails = AndroidNotificationDetails(
+        'habit_alarms',
+        'Habit Alarms',
+        channelDescription: 'Reminds user to complete habits',
+        importance: Importance.max,
+        priority: Priority.high,
+        playSound: true,
+      );
 
       await _plugin.zonedSchedule(
-        id,
-        '🔥 DrillOS Reminder',
-        message,
-        scheduled,
-        details,
-        androidScheduleMode: mode,
+        habitId.hashCode,
+        habitName,
+        mentorMessage,
+        next,
+        const NotificationDetails(android: androidDetails),
+        androidAllowWhileIdle: true,
         uiLocalNotificationDateInterpretation:
             UILocalNotificationDateInterpretation.absoluteTime,
-        matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime,
+        matchDateTimeComponents: DateTimeComponents.time,
       );
-    }
 
-    await localStorage.setAlarmTime(habitId, time);
+      debugPrint('✅ Alarm scheduled for $time ($habitName)');
+    } catch (e, st) {
+      debugPrint('❌ Alarm scheduling failed: $e\n$st');
+      rethrow;
+    }
   }
 
   Future<void> cancelAlarm(String habitId) async {
-    await init();
-    for (int dow = 1; dow <= 7; dow++) {
-      await _plugin.cancel(_notificationId(habitId, dow));
+    try {
+      await _plugin.cancel(habitId.hashCode);
+    } catch (e) {
+      debugPrint('⚠️ Cancel failed for $habitId: $e');
     }
-    await localStorage.removeAlarm(habitId);
   }
 
-  int _notificationId(String habitId, int dow) {
-    final base = habitId.hashCode & 0x7fffffff;
-    return (base ^ dow) % 0x7fffffff;
-  }
-
-  tz.TZDateTime _nextInstanceOf(int dow, int hour, int minute) {
-    final now = tz.TZDateTime.now(tz.local);
-    var scheduled =
-        tz.TZDateTime(tz.local, now.year, now.month, now.day, hour, minute);
-    while (scheduled.weekday != dow || !scheduled.isAfter(now)) {
-      scheduled = scheduled.add(const Duration(days: 1));
+  Future<void> cancelAll() async {
+    try {
+      await _plugin.cancelAll();
+    } catch (e) {
+      debugPrint('⚠️ Cancel all failed: $e');
     }
-    return scheduled;
   }
 }
 
