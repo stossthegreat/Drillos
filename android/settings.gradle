@@ -3,13 +3,25 @@ pluginManagement {
         google()
         mavenCentral()
         gradlePluginPortal()
+        maven { url 'https://storage.googleapis.com/download.flutter.io' }
     }
-    // Standard Flutter include
-    def flutterSdkPath = System.getenv("FLUTTER_ROOT")
+
+    // Resolve Flutter SDK location from local.properties or FLUTTER_ROOT
+    def flutterSdkPath = null
+    File localProps = new File(rootDir, 'local.properties')
+    if (localProps.exists()) {
+        Properties props = new Properties()
+        localProps.withInputStream { props.load(it) }
+        flutterSdkPath = props.getProperty('flutter.sdk')
+    }
     if (flutterSdkPath == null || flutterSdkPath.isEmpty()) {
-        // Fallback for CI/remote environments
-        flutterSdkPath = "/workspace/flutter"
+        flutterSdkPath = System.getenv('FLUTTER_ROOT')
     }
+    if (flutterSdkPath == null || flutterSdkPath.isEmpty()) {
+        // Allow CI to define a default path
+        flutterSdkPath = '/workspace/flutter'
+    }
+
     includeBuild("${flutterSdkPath}/packages/flutter_tools/gradle")
 }
 
