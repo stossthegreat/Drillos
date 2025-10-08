@@ -331,7 +331,20 @@ class HabitService {
     } catch (_) {}
   }
 
-  // ---------- REMOTE SYNC ----------
+ Future<void> cleanupOldItems() async {
+  final items = await _storage.getAllHabits();
+  for (final h in items) {
+    final id = h['id'];
+    if (id == null || id.toString().isEmpty) {
+      await _storage.deleteHabit(id);
+      continue;
+    }
+    final type = h['type'];
+    if (type != 'habit' && type != 'task' && type != 'bad') {
+      await _storage.deleteHabit(id);
+    }
+  }
+ } // ---------- REMOTE SYNC ----------
 
   void _syncHabitToBackend(Map<String, dynamic> habit) {
     _api
