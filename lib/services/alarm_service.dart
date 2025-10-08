@@ -1,96 +1,108 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:android_alarm_manager_plus/android_alarm_manager_plus.dart';
 import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest.dart' as tzdata;
 
-/// 🔔 Alarm Service (Flutter Local Notifications v18 compatible)
+/// 🔔 Real Alarm Service using android_alarm_manager_plus + flutter_local_notifications
 class AlarmService {
   static final AlarmService _instance = AlarmService._internal();
   factory AlarmService() => _instance;
   AlarmService._internal();
 
-  final _plugin = FlutterLocalNotificationsPlugin();
+  final FlutterLocalNotificationsPlugin _notifications =
+      FlutterLocalNotificationsPlugin();
+
   bool _initialized = false;
 
   Future<void> init() async {
     if (_initialized) return;
-
     tzdata.initializeTimeZones();
 
     const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
     const initSettings = InitializationSettings(android: androidInit);
+    await _notifications.initialize(initSettings);
 
-    await _plugin.initialize(initSettings);
+    await AndroidAlarmManager.initialize();
     _initialized = true;
-    debugPrint('✅ AlarmService initialized');
+    debugPrint('✅ AlarmService initialized (real alarm mode)');
   }
 
-  /// Request notification permission (Android 13+ safe)
+  /// Requests POST_NOTIFICATIONS permission on Android 13+
   Future<void> requestPermissions() async {
     try {
-      final androidPlugin = _plugin.resolvePlatformSpecificImplementation<
+      final androidPlugin = _notifications.resolvePlatformSpecificImplementation<
           AndroidFlutterLocalNotificationsPlugin>();
-
-      if (androidPlugin != null) {
-        await androidPlugin.requestNotificationsPermission();
-        debugPrint('✅ Notification permission requested');
-      }
+      await androidPlugin?.requestNotificationsPermission();
     } catch (e) {
-      debugPrint('⚠️ Permission request failed: $e');
+      debugPrint('⚠️ Notification permission failed: $e');
     }
   }
 
-  /// Schedule an alarm notification
+  /// Schedule a true alarm
   Future<void> scheduleAlarm({
     required String habitId,
     required String habitName,
     required String time,
-    required List<int> daysOfWeek,
     required String mentorMessage,
   }) async {
     await init();
 
-    try {
-      final parts = time.split(':');
-      final hour = int.parse(parts[0]);
-      final minute = int.parse(parts[1]);
+    final parts = time.split(':');
+    final hour = int.parse(parts[0]);
+    final minute = int.parse(parts[1]);
 
-      final now = tz.TZDateTime.now(tz.local);
-      var next = tz.TZDateTime(tz.local, now.year, now.month, now.day, hour, minute);
-      if (next.isBefore(now)) {
-        next = next.add(const Duration(days: 1));
-      }
+    final now = DateTime.now();
+    var next = DateTime(now.year, now.month, now.day, hour, minute);
+    if (next.isBefore(now)) next = next.add(const Duration(days: 1));
 
-      const androidDetails = AndroidNotificationDetails(
-        'habit_alarms',
-        'Habit Alarms',
-        channelDescription: 'Reminds user to complete habits',
-        importance: Importance.max,
-        priority: Priority.high,
-        playSound: true,
-      );
+    // Register background alarm
+    await AndroidAlarmManager.oneShotAt(
+      next,
+      habitId.hashCode,
+      _alarmCallback,
+      alarmClock: true, // real OS-level alarm
+      allowWhileIdle: true,
+      wakeup: true,
+      rescheduleOnReboot: true,
+      params: {'habitName': habitName, 'mentorMessage': mentorMessage},
+    );
 
-      await _plugin.zonedSchedule(
-        habitId.hashCode,
-        habitName,
-        mentorMessage,
-        next,
-        const NotificationDetails(android: androidDetails),
-        uiLocalNotificationDateInterpretation:
-            UILocalNotificationDateInterpretation.absoluteTime,
-        matchDateTimeComponents: DateTimeComponents.time,
-      );
+    debugPrint('✅ Real alarm scheduled for $time ($habitName)');
+  }
 
-      debugPrint('✅ Alarm scheduled for $time ($habitName)');
-    } catch (e, st) {
-      debugPrint('❌ Alarm scheduling failed: $e\n$st');
-      rethrow;
-    }
+  /// The callback runs when the alarm fires (background-safe)
+  static Future<void> _alarmCallback(Map<String, dynamic> params) async {
+    final plugin = FlutterLocalNotificationsPlugin();
+    const androidDetails = AndroidNotificationDetails(
+      'habit_alarms',
+      'Habit Alarms',
+      channelDescription: 'Real alarm notifications',
+      importance: Importance.max,
+      priority: Priority.high,
+      playSound: true,
+      enableVibration: true,
+      fullScreenIntent: true, // wake up the screen
+    );
+
+    final notificationDetails = const NotificationDetails(android: androidDetails);
+    await plugin.initialize(const InitializationSettings(
+        android: AndroidInitializationSettings('@mipmap/ic_launcher')));
+
+    final habitName = params['habitName'] ?? 'Habit Reminder';
+    final message = params['mentorMessage'] ?? 'Time to rise and conquer!';
+    await plugin.show(
+      DateTime.now().millisecondsSinceEpoch.remainder(100000),
+      habitName,
+      message,
+      notificationDetails,
+    );
   }
 
   Future<void> cancelAlarm(String habitId) async {
     try {
-      await _plugin.cancel(habitId.hashCode);
+      await AndroidAlarmManager.cancel(habitId.hashCode);
       debugPrint('🗑️ Alarm canceled for $habitId');
     } catch (e) {
       debugPrint('⚠️ Cancel failed: $e');
@@ -99,8 +111,8 @@ class AlarmService {
 
   Future<void> cancelAll() async {
     try {
-      await _plugin.cancelAll();
-      debugPrint('🧹 All alarms canceled');
+      await _notifications.cancelAll();
+      debugPrint('🧹 All notifications cleared');
     } catch (e) {
       debugPrint('⚠️ Cancel all failed: $e');
     }
