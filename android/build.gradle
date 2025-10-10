@@ -5,9 +5,8 @@ buildscript {
         maven { url 'https://storage.googleapis.com/download.flutter.io' }
     }
     dependencies {
-        // ✅ Upgraded to supported versions
-        classpath "com.android.tools.build:gradle:8.6.0"
-        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:2.1.0"
+        classpath "com.android.tools.build:gradle:8.4.2"
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:2.0.21"
     }
 }
 
