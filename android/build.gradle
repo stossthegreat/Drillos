@@ -5,9 +5,9 @@ buildscript {
         maven { url 'https://storage.googleapis.com/download.flutter.io' }
     }
     dependencies {
-        // Align with Flutter-supported AGP to ensure plugin compatibility
-        classpath "com.android.tools.build:gradle:8.4.2"
-        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:2.0.21"
+        // ✅ Upgraded to supported versions
+        classpath "com.android.tools.build:gradle:8.6.0"
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:2.1.0"
     }
 }
 
@@ -15,7 +15,6 @@ allprojects {
     repositories {
         google()
         mavenCentral()
-        // Flutter engine/artifacts repository (safe to include)
         maven { url 'https://storage.googleapis.com/download.flutter.io' }
     }
 }
