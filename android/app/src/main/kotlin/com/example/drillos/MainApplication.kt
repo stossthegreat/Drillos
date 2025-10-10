@@ -1,12 +1,5 @@
-package com.example.drillos
+package com.example.drill_os
 
-import android.app.Application
-import androidx.multidex.MultiDex
-import androidx.multidex.MultiDexApplication
+import io.flutter.embedding.android.FlutterActivity
 
-class MainApplication : MultiDexApplication() {
-    override fun onCreate() {
-        super.onCreate()
-        // You can initialize SDKs here if needed
-    }
-}
+class MainActivity : FlutterActivity()
