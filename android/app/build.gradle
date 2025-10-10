@@ -30,13 +30,6 @@ android {
         vectorDrawables.useSupportLibrary = true
     }
 
-    // 🔥 block old Flutter v1 registrant forever
-    sourceSets {
-        main.java {
-            exclude 'io/flutter/plugins/**'
-        }
-    }
-
     buildTypes {
         release {
             signingConfig signingConfigs.debug
