@@ -1,53 +1,72 @@
 plugins {
     id "com.android.application"
-    id "org.jetbrains.kotlin.android"
+    id "kotlin-android"
     id "dev.flutter.flutter-gradle-plugin"
 }
 
-flutter {
-    source '../..'
+def localProperties = new Properties()
+def localPropertiesFile = rootProject.file('local.properties')
+if (localPropertiesFile.exists()) {
+    localPropertiesFile.withReader('UTF-8') { reader ->
+        localProperties.load(reader)
+    }
 }
 
+def flutterVersionCode = localProperties.getProperty('flutter.versionCode') ?: '1'
+def flutterVersionName = localProperties.getProperty('flutter.versionName') ?: '1.0'
+
 android {
-    namespace "com.example.drillos"
-    compileSdkVersion 34
+    namespace "com.example.future_you_os"
+    compileSdk flutter.compileSdkVersion
+    ndkVersion flutter.ndkVersion
 
     defaultConfig {
-        applicationId "com.example.drillos"
-        minSdkVersion flutter.minSdkVersion
-        targetSdkVersion 34
-        versionCode 1
-        versionName "1.0.0"
+        applicationId "com.example.future_you_os"
+        minSdkVersion 21
+        targetSdkVersion flutter.targetSdkVersion
+        versionCode flutterVersionCode.toInteger()
+        versionName flutterVersionName
         multiDexEnabled true
+        vectorDrawables.useSupportLibrary = true
+    }
+
+    // 🔥 block old Flutter v1 registrant forever
+    sourceSets {
+        main.java {
+            exclude 'io/flutter/plugins/**'
+        }
     }
 
     buildTypes {
         release {
-            minifyEnabled true
-            shrinkResources true
-            // Keep debug signing only if no release keystore configured
             signingConfig signingConfigs.debug
-            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
-        }
-        debug {
             minifyEnabled false
         }
+        debug { }
     }
 
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_17
-        targetCompatibility JavaVersion.VERSION_17
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
         coreLibraryDesugaringEnabled true
     }
 
     kotlinOptions {
-        jvmTarget = "17"
-        freeCompilerArgs += ["-Xjvm-default=all"]
+        jvmTarget = '1.8'
+    }
+
+    packagingOptions {
+        resources {
+            excludes += ['META-INF/LICENSE*', 'META-INF/AL2.0', 'META-INF/LGPL2.1']
+        }
     }
 }
 
 dependencies {
-    implementation "androidx.multidex:multidex:2.0.1"
     coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.0.4"
-    implementation "androidx.work:work-runtime-ktx:2.9.1"
+    implementation "org.jetbrains.kotlin:kotlin-stdlib:${org.jetbrains.kotlin.config.KotlinCompilerVersion.VERSION}"
+}
+
+flutter {
+    source '../..'
 }
