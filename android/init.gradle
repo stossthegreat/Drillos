@@ -1,0 +1,25 @@
+// Gradle init script to provide Flutter properties to all subprojects
+allprojects {
+    afterEvaluate { project ->
+        // Add flutter extension to all android library projects
+        if (project.hasProperty('android')) {
+            project.android {
+                if (!hasProperty('compileSdkVersion') || compileSdkVersion == null) {
+                    compileSdkVersion 34
+                }
+                if (!hasProperty('buildToolsVersion') || buildToolsVersion == null) {
+                    buildToolsVersion "34.0.0"
+                }
+                
+                defaultConfig {
+                    if (!hasProperty('minSdkVersion') || minSdkVersion == null) {
+                        minSdkVersion 21
+                    }
+                    if (!hasProperty('targetSdkVersion') || targetSdkVersion == null) {
+                        targetSdkVersion 34
+                    }
+                }
+            }
+        }
+    }
+}
