@@ -1,4 +1,4 @@
-name: Android APK Build
+name: Android APK Build (Fixed)
 
 on:
   push:
@@ -39,31 +39,33 @@ jobs:
           channel: 'stable'
           cache: true
 
-      # 🔧 NEW — clean everything to avoid plugin + gradle corruption
+      # 🧹 Clean everything before build (fixes GeneratedPluginRegistrant & plugin issues)
       - name: 🧹 Clean Flutter & Gradle caches
         run: |
+          echo "🧼 Cleaning caches and old build data..."
           flutter clean
+          rm -rf build
           rm -rf android/.gradle
           rm -rf android/app/src/main/java/io/flutter/plugins
-          rm -rf build
           flutter pub get
+          flutter pub cache repair || true
 
       - name: 🔍 Verify Flutter setup
         run: flutter doctor -v
 
-      - name: 🧪 Run Flutter tests
+      - name: 🧪 Run Flutter tests (optional)
         run: flutter test || echo "No tests found"
         continue-on-error: true
 
       # 🏗️ Build Debug
       - name: 🏗️ Build Debug APK
         if: github.event.inputs.build_type == 'debug' || github.event_name == 'pull_request'
-        run: flutter build apk --debug --android-skip-build-dependency-validation
+        run: flutter build apk --debug --android-skip-build-dependency-validation --no-tree-shake-icons
 
       # 🚀 Build Release
       - name: 🚀 Build Release APK
         if: github.event.inputs.build_type != 'debug' && github.event_name != 'pull_request'
-        run: flutter build apk --release --android-skip-build-dependency-validation
+        run: flutter build apk --release --android-skip-build-dependency-validation --no-tree-shake-icons
 
       # 📤 Upload Debug
       - name: 📤 Upload Debug APK
