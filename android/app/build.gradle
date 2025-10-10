@@ -17,13 +17,13 @@ def flutterVersionName = localProperties.getProperty('flutter.versionName') ?: '
 
 android {
     namespace "com.example.future_you_os"
-    compileSdk flutter.compileSdkVersion
-    ndkVersion flutter.ndkVersion
+    compileSdk flutter.compileSdkVersion ?: 34
+    ndkVersion flutter.ndkVersion ?: "26.1.10909125"
 
     defaultConfig {
         applicationId "com.example.future_you_os"
-        minSdkVersion 21
-        targetSdkVersion flutter.targetSdkVersion
+        minSdkVersion flutter.minSdkVersion ?: 21
+        targetSdkVersion flutter.targetSdkVersion ?: 34
         versionCode flutterVersionCode.toInteger()
         versionName flutterVersionName
         multiDexEnabled true
