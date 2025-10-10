@@ -41,6 +41,11 @@ jobs:
           echo "sdk.dir=$ANDROID_HOME" >> android/local.properties
           cat android/local.properties
 
+      - name: 🔨 Patch broken plugins
+        run: |
+          chmod +x patch_plugins.sh
+          ./patch_plugins.sh
+
       - name: ✅ Verify Flutter doctor
         run: flutter doctor -v
 
@@ -48,8 +53,7 @@ jobs:
         run: |
           flutter build apk --release \
             --no-tree-shake-icons \
-            --target-platform android-arm64 \
-            -- --init-script=android/init.gradle
+            --target-platform android-arm64
 
       - name: 📤 Upload APK
         uses: actions/upload-artifact@v4
