@@ -1,0 +1,57 @@
+name: Android APK (Full Clean & Rebuild)
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: ☕ Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: 🐦 Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: false   # ⚠️ disable cached Flutter binaries
+
+      - name: 🧨 Full clean (remove every cached build + registrant)
+        run: |
+          echo "🔥 Purging all build + plugin cache..."
+          rm -rf android/app/src/main/java/io/flutter/plugins || true
+          rm -rf build/ .dart_tool/ .packages pubspec.lock || true
+          flutter clean
+          flutter pub cache repair
+          flutter pub get
+          echo "✅ Fresh environment ready"
+
+      - name: 🔁 Force plugin regeneration (dummy debug build)
+        run: |
+          echo "⚙️ Re-creating GeneratedPluginRegistrant..."
+          flutter pub get
+          flutter build apk --debug --no-tree-shake-icons || true
+          echo "✅ Plugin regeneration complete"
+
+      - name: 🚀 Build release APK
+        run: |
+          echo "🏗️ Building clean release..."
+          flutter build apk --release \
+            --android-skip-build-dependency-validation \
+            --no-tree-shake-icons
+
+      - name: 📦 Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release
+          path: build/app/outputs/flutter-apk/app-release.apk
