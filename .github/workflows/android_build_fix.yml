@@ -1,4 +1,4 @@
-name: Android APK (Final Fix)
+name: Android APK (Ultimate Regeneration Fix)
 
 on:
   push:
@@ -10,6 +10,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
       - name: 📥 Checkout repository
@@ -26,25 +27,37 @@ jobs:
         with:
           channel: 'stable'
 
-      - name: 🧨 Delete broken plugin registrant
+      - name: 🧹 Clean and fetch deps
         run: |
-          echo "🧹 Removing old GeneratedPluginRegistrant..."
-          rm -rf android/app/src/main/java/io/flutter/plugins || true
           flutter clean
           flutter pub get
-          echo "✅ Clean complete"
+          flutter doctor -v
 
-      - name: 🚫 Disable file watching & build release APK
-        env:
-          NO_WATCHMAN: "true"
-          CHOKIDAR_USEPOLLING: "false"
-          FLUTTER_SUPPRESS_ANALYTICS: "true"
+      # 🧨 Delete all plugin registrant files (the real cause)
+      - name: 🔥 Nuke old plugin registrant
         run: |
-          echo "🚀 Building APK without watcher..."
-          export GLOB_BRACE="1"
-          flutter build apk --release --android-skip-build-dependency-validation --no-tree-shake-icons --no-watch --verbose
+          echo "🔥 Deleting corrupted GeneratedPluginRegistrant..."
+          rm -rf android/app/src/main/java/io/flutter/plugins || true
+          rm -f android/app/src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java || true
+          find android -type f -name "GeneratedPluginRegistrant.java" -delete || true
+          echo "✅ All old registrants deleted"
 
-      - name: 📦 Upload Release APK
+      # 🔁 Rebuild dummy debug build to force plugin regeneration
+      - name: 🔁 Force plugin regeneration
+        run: |
+          echo "⚙️ Forcing Flutter to regenerate plugins..."
+          flutter pub get
+          flutter build apk --debug --no-tree-shake-icons || true
+          echo "✅ Plugins regenerated"
+
+      # 🚀 Now build release APK (real build)
+      - name: 🚀 Build Release APK
+        run: |
+          echo "🏗️ Building release..."
+          flutter build apk --release --android-skip-build-dependency-validation --no-tree-shake-icons
+
+      # 📦 Upload APK
+      - name: 📦 Upload Release Artifact
         uses: actions/upload-artifact@v4
         with:
           name: app-release
