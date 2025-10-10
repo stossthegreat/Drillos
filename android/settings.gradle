@@ -5,24 +5,10 @@ pluginManagement {
         gradlePluginPortal()
         maven { url 'https://storage.googleapis.com/download.flutter.io' }
     }
+}
 
-    // Resolve Flutter SDK location from local.properties or FLUTTER_ROOT
-    def flutterSdkPath = null
-    File localProps = new File(rootDir, 'local.properties')
-    if (localProps.exists()) {
-        Properties props = new Properties()
-        localProps.withInputStream { props.load(it) }
-        flutterSdkPath = props.getProperty('flutter.sdk')
-    }
-    if (flutterSdkPath == null || flutterSdkPath.isEmpty()) {
-        flutterSdkPath = System.getenv('FLUTTER_ROOT')
-    }
-    if (flutterSdkPath == null || flutterSdkPath.isEmpty()) {
-        // Allow CI to define a default path
-        flutterSdkPath = '/workspace/flutter'
-    }
-
-    includeBuild("${flutterSdkPath}/packages/flutter_tools/gradle")
+plugins {
+    id "dev.flutter.flutter-gradle-plugin" version "1.0.0" apply false
 }
 
 include(":app")
