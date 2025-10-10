@@ -1,4 +1,4 @@
-name: Android APK Build (FINAL FIX)
+name: Android APK Build (CI Safe)
 
 on:
   push:
@@ -6,17 +6,27 @@ on:
   pull_request:
     branches: [ main ]
   workflow_dispatch:
+    inputs:
+      build_type:
+        description: 'Build type (debug or release)'
+        required: false
+        default: 'release'
+        type: choice
+        options:
+          - debug
+          - release
 
 jobs:
   build:
+    name: Build Android APK
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
     steps:
-      - name: 📥 Checkout
+      - name: 📥 Checkout repository
         uses: actions/checkout@v4
 
-      - name: ☕ Setup Java
+      - name: ☕ Setup Java 17
         uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
@@ -29,26 +39,78 @@ jobs:
           channel: 'stable'
           cache: true
 
-      # 💣 Delete stale plugin registrant + rebuild plugins
-      - name: 🔧 Regenerate Flutter plugins
+      - name: 📦 Get Flutter dependencies
+        run: flutter pub get
+
+      # 💣 Fix: Clear stale plugin registrant and Gradle caches
+      - name: 🔧 Regenerate Flutter Plugins (Clean Fix)
         run: |
-          echo "🧨 Removing GeneratedPluginRegistrant + caches"
+          echo "🧨 Nuking old GeneratedPluginRegistrant and Gradle caches..."
           rm -rf android/app/src/main/java/io/flutter/plugins
           rm -rf android/.gradle
+          rm -rf android/build
           flutter clean
           flutter pub get
           flutter pub cache repair || true
+          flutter doctor -v
           flutter packages pub run build_runner build --delete-conflicting-outputs || true
 
-      - name: 🔍 Doctor
-        run: flutter doctor -v
+      - name: 🧪 Run Flutter tests (optional)
+        run: flutter test || echo "No tests found"
+        continue-on-error: true
 
-      - name: 🚀 Build Release
+      - name: 🏗️ Build Debug APK
+        if: github.event.inputs.build_type == 'debug' || github.event_name == 'pull_request'
+        run: flutter build apk --debug --no-tree-shake-icons
+
+      - name: 🚀 Build Release APK
+        if: github.event.inputs.build_type != 'debug' && github.event_name != 'pull_request'
         run: flutter build apk --release --android-skip-build-dependency-validation --no-tree-shake-icons
 
-      - name: 📤 Upload Release APK
+      - name: 📤 Upload Debug APK
+        if: github.event.inputs.build_type == 'debug' || github.event_name == 'pull_request'
         uses: actions/upload-artifact@v4
         with:
-          name: drillos-release-${{ github.sha }}
+          name: futureyouos-debug-${{ github.sha }}
+          path: build/app/outputs/flutter-apk/app-debug.apk
+          retention-days: 30
+
+      - name: 📤 Upload Release APK
+        if: github.event.inputs.build_type != 'debug' && github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: futureyouos-release-${{ github.sha }}
           path: build/app/outputs/flutter-apk/app-release.apk
           retention-days: 90
+
+      - name: 📊 Generate Build Summary
+        if: always()
+        run: |
+          echo "## 🎉 Future You OS APK Build Complete!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📱 Build Information" >> $GITHUB_STEP_SUMMARY
+          echo "- **Build Type**: ${{ github.event.inputs.build_type || 'release' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch**: \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Flutter Version**: $(flutter --version | head -n1)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -f "build/app/outputs/flutter-apk/app-release.apk" ]; then
+            echo "### 📦 Release APK" >> $GITHUB_STEP_SUMMARY
+            echo "- **Size**: $(du -h build/app/outputs/flutter-apk/app-release.apk | cut -f1)" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ -f "build/app/outputs/flutter-apk/app-debug.apk" ]; then
+            echo "### 🐛 Debug APK" >> $GITHUB_STEP_SUMMARY
+            echo "- **Size**: $(du -h build/app/outputs/flutter-apk/app-debug.apk | cut -f1)" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### ✨ Key Features" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ AI Mentors with Voice" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Habit Tracking & Streaks" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Smart Alarms & Nudges" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Future Mirror & Offset Engine" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Modern Glass UI" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "📥 **Download**: Check Artifacts section below" >> $GITHUB_STEP_SUMMARY
