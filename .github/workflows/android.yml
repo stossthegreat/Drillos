@@ -1,16 +1,14 @@
-name: Android Build CI
+name: Android APK Build
 
 on:
   push:
-    branches: [ main ]
-  pull_request:
     branches: [ main ]
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 25
 
     steps:
       - name: 📥 Checkout
@@ -25,23 +23,36 @@ jobs:
       - name: 🐦 Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          channel: 'stable'
+          channel: stable
+          cache: true
 
-      - name: 🧹 Clean and Remove Stale Registrant
+      - name: 🧹 Clean build artifacts
         run: |
-          echo "Deleting old GeneratedPluginRegistrant.java if it exists..."
+          echo "🔥 Cleaning old builds..."
           rm -rf android/app/src/main/java/io/flutter/plugins || true
           flutter clean
-          flutter pub get
 
-      - name: 🏗️ Build Debug (ensure plugins regenerate)
-        run: flutter build apk --debug --no-tree-shake-icons || true
+      - name: 📦 Get dependencies
+        run: flutter pub get
+
+      - name: 🔧 Generate local.properties
+        run: |
+          echo "flutter.sdk=$FLUTTER_ROOT" > android/local.properties
+          echo "sdk.dir=$ANDROID_HOME" >> android/local.properties
+          cat android/local.properties
+
+      - name: ✅ Verify Flutter doctor
+        run: flutter doctor -v
 
       - name: 🚀 Build Release APK
-        run: flutter build apk --release --android-skip-build-dependency-validation --no-tree-shake-icons
+        run: |
+          flutter build apk --release \
+            --no-tree-shake-icons \
+            --target-platform android-arm64
 
       - name: 📤 Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: app-release
           path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
