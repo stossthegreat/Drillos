@@ -1,4 +1,10 @@
-name: Android APK (Clean Fix)
+- name: 🔥 Delete bad GeneratedPluginRegistrant on GitHub runner
+  run: |
+   echo "Deleting broken GeneratedPluginRegistrant.java so Flutter will regenerate it..."
+   rm -f android/app/src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java
+   rm -rf android/app/src/main/java/io/flutter/plugins
+   flutter clean
+   
 
 on:
   push:
