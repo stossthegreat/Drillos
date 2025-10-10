@@ -1,10 +1,4 @@
-- name: 🔥 Delete bad GeneratedPluginRegistrant on GitHub runner
-  run: |
-   echo "Deleting broken GeneratedPluginRegistrant.java so Flutter will regenerate it..."
-   rm -f android/app/src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java
-   rm -rf android/app/src/main/java/io/flutter/plugins
-   flutter clean
-   
+name: Android APK (Clean Fix)
 
 on:
   push:
@@ -18,40 +12,43 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
+      - name: 📥 Checkout repo
         uses: actions/checkout@v4
 
-      - name: Setup Java
+      - name: ☕ Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Setup Flutter
+      - name: 🐦 Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
 
-      - name: Clean broken registrant
+      # ✅ Delete broken GeneratedPluginRegistrant before build
+      - name: 🔥 Delete bad GeneratedPluginRegistrant on GitHub runner
         run: |
-          echo "🧹 Removing bad GeneratedPluginRegistrant..."
+          echo "Deleting broken GeneratedPluginRegistrant.java so Flutter will regenerate it..."
+          rm -f android/app/src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java || true
           rm -rf android/app/src/main/java/io/flutter/plugins || true
           flutter clean
+
+      - name: 🧹 Clean & Fetch dependencies
+        run: |
           flutter pub get
           flutter doctor -v
           echo "✅ Clean complete"
 
-      - name: Regenerate plugins
+      - name: 🔁 Force plugin re-registration
         run: |
-          echo "🔁 Forcing plugin re-registration..."
-          flutter pub get
           flutter build apk --debug --no-tree-shake-icons || true
           echo "✅ Plugin regeneration done"
 
-      - name: Build release APK
+      - name: 🚀 Build release APK
         run: flutter build apk --release --android-skip-build-dependency-validation --no-tree-shake-icons
 
-      - name: Upload APK
+      - name: 📤 Upload Release APK
         uses: actions/upload-artifact@v4
         with:
           name: app-release
