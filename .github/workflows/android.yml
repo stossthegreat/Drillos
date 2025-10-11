@@ -35,10 +35,13 @@ jobs:
       - name: 📦 Get dependencies
         run: flutter pub get
 
-      - name: 🔨 Patch broken plugins (before build)
+      - name: 🔨 Patch broken plugins (AGGRESSIVE)
         run: |
           chmod +x patch_plugins.sh
           ./patch_plugins.sh
+          echo ""
+          echo "📋 Verifying patch was applied..."
+          cat $HOME/.pub-cache/hosted/pub.dev/android_alarm_manager_plus-*/android/build.gradle || echo "Could not verify"
 
       - name: 🔧 Generate local.properties
         run: |
