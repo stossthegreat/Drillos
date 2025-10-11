@@ -22,38 +22,6 @@ subprojects {
     project.buildDir = "${rootProject.buildDir}/${project.name}"
 }
 
-// Global configuration for all subprojects to provide missing Flutter properties
-subprojects { subproject ->
-    afterEvaluate {
-        if (subproject.hasProperty('android')) {
-            // Inject Flutter SDK properties globally
-            subproject.android {
-                compileSdkVersion = compileSdkVersion ?: 34
-                buildToolsVersion = buildToolsVersion ?: "34.0.0"
-                
-                if (hasProperty('defaultConfig')) {
-                    defaultConfig {
-                        minSdkVersion = minSdkVersion ?: 21
-                        targetSdkVersion = targetSdkVersion ?: 34
-                    }
-                }
-            }
-            
-            // Add flutter extension for plugins that expect it
-            if (!subproject.extensions.findByName('flutter')) {
-                subproject.extensions.create('flutter', FlutterExtension)
-            }
-        }
-    }
-}
-
-class FlutterExtension {
-    int compileSdkVersion = 34
-    int minSdkVersion = 21
-    int targetSdkVersion = 34
-    String ndkVersion = "26.1.10909125"
-}
-
 tasks.register("clean", Delete) {
     delete rootProject.buildDir
 }
