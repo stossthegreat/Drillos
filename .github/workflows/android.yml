@@ -35,13 +35,38 @@ jobs:
       - name: 📦 Get dependencies
         run: flutter pub get
 
+      - name: 🔍 Debug - Check plugin location
+        run: |
+          echo "Looking for android_alarm_manager_plus..."
+          find "$HOME/.pub-cache/hosted/pub.dev" -type d -name "android_alarm_manager_plus-*" || echo "Not found"
+          echo ""
+          echo "Listing pub cache contents:"
+          ls -la "$HOME/.pub-cache/hosted/pub.dev/" | grep android_alarm || echo "Not in pub cache"
+
       - name: 🔨 Patch broken plugins (AGGRESSIVE)
         run: |
           chmod +x patch_plugins.sh
           ./patch_plugins.sh
-          echo ""
-          echo "📋 Verifying patch was applied..."
-          cat $HOME/.pub-cache/hosted/pub.dev/android_alarm_manager_plus-*/android/build.gradle || echo "Could not verify"
+          
+      - name: 📋 Verify patch was applied
+        run: |
+          echo "Checking patched file..."
+          PLUGIN_BUILD=$(find "$HOME/.pub-cache/hosted" -path "*/android_alarm_manager_plus-*/android/build.gradle" -print -quit)
+          if [ -f "$PLUGIN_BUILD" ]; then
+            echo "✅ Found at: $PLUGIN_BUILD"
+            echo "Content:"
+            cat "$PLUGIN_BUILD"
+          else
+            echo "❌ Plugin build.gradle not found!"
+          fi
+
+      - name: 🧹 Clean Gradle cache
+        run: |
+          cd android
+          ./gradlew clean --no-daemon
+          rm -rf .gradle
+          rm -rf app/.gradle
+          cd ..
 
       - name: 🔧 Generate local.properties
         run: |
